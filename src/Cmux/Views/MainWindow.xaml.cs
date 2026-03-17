@@ -53,6 +53,79 @@ public partial class MainWindow : Window
         OnSettingsChanged();
 
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+        // Fix maximized window covering taskbar (WindowStyle=None + AllowsTransparency)
+        SourceInitialized += (_, _) =>
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            var source = System.Windows.Interop.HwndSource.FromHwnd(handle);
+            source?.AddHook(WndProc);
+        };
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        // WM_GETMINMAXINFO = 0x0024
+        if (msg == 0x0024)
+        {
+            WmGetMinMaxInfo(hwnd, lParam);
+            handled = true;
+        }
+        return IntPtr.Zero;
+    }
+
+    private static void WmGetMinMaxInfo(IntPtr hwnd, IntPtr lParam)
+    {
+        var mmi = System.Runtime.InteropServices.Marshal.PtrToStructure<MINMAXINFO>(lParam);
+
+        // Get monitor info for the monitor this window is on
+        var monitor = MonitorFromWindow(hwnd, 0x00000002); // MONITOR_DEFAULTTONEAREST
+        if (monitor != IntPtr.Zero)
+        {
+            var monitorInfo = new MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+            if (GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                var work = monitorInfo.rcWork;
+                var full = monitorInfo.rcMonitor;
+                mmi.ptMaxPosition.X = work.Left - full.Left;
+                mmi.ptMaxPosition.Y = work.Top - full.Top;
+                mmi.ptMaxSize.X = work.Right - work.Left;
+                mmi.ptMaxSize.Y = work.Bottom - work.Top;
+            }
+        }
+
+        System.Runtime.InteropServices.Marshal.StructureToPtr(mmi, lParam, true);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMaxTrackSize;
+        public POINT ptMinTrackSize;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
     }
 
     private void OnSettingsChanged()
@@ -228,19 +301,6 @@ public partial class MainWindow : Window
         // Update maximize/restore icon
         MaxRestoreIcon.Text = maximized ? "\uE923" : "\uE922";
         MaxRestoreButton.ToolTip = maximized ? "Restore" : "Maximize";
-
-        // Fix: respect taskbar when maximized with custom WindowChrome
-        if (maximized)
-        {
-            MaxHeight = SystemParameters.MaximizedPrimaryScreenHeight;
-            MaxWidth = SystemParameters.MaximizedPrimaryScreenWidth;
-        }
-        else
-        {
-            MaxHeight = double.PositiveInfinity;
-            MaxWidth = double.PositiveInfinity;
-        }
-
         UpdateWindowClip();
     }
 
