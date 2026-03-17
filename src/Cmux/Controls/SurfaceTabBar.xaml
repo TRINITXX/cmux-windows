@@ -130,7 +130,7 @@
         <Button Content="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="12"
                 Style="{StaticResource CmuxButton}"
                 Click="AddTab_Click"
-                Padding="8,0" Margin="2,4,4,4" Opacity="0.6" VerticalAlignment="Center" />
+                Width="28" Height="28" Padding="0" Margin="2,4,4,4" Opacity="0.6" VerticalAlignment="Center" />
         </StackPanel>
 
         <!-- Inline search bar -->
