@@ -78,7 +78,6 @@ public partial class MainWindow : Window
     {
         var mmi = System.Runtime.InteropServices.Marshal.PtrToStructure<MINMAXINFO>(lParam);
 
-        // Get monitor info for the monitor this window is on
         var monitor = MonitorFromWindow(hwnd, 0x00000002); // MONITOR_DEFAULTTONEAREST
         if (monitor != IntPtr.Zero)
         {
@@ -87,10 +86,30 @@ public partial class MainWindow : Window
             {
                 var work = monitorInfo.rcWork;
                 var full = monitorInfo.rcMonitor;
+
                 mmi.ptMaxPosition.X = work.Left - full.Left;
                 mmi.ptMaxPosition.Y = work.Top - full.Top;
                 mmi.ptMaxSize.X = work.Right - work.Left;
                 mmi.ptMaxSize.Y = work.Bottom - work.Top;
+
+                // If taskbar is auto-hide (work area == monitor area), leave 2px
+                // at each edge so the mouse can trigger the taskbar to appear
+                if (work.Left == full.Left && work.Top == full.Top &&
+                    work.Right == full.Right && work.Bottom == full.Bottom)
+                {
+                    var abd = new APPBARDATA { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<APPBARDATA>() };
+                    var state = SHAppBarMessage(0x00000004, ref abd); // ABM_GETSTATE
+                    bool autoHide = (state & 0x01) != 0; // ABS_AUTOHIDE
+
+                    if (autoHide)
+                    {
+                        // Shrink by 2px on all edges to allow auto-hide taskbar trigger
+                        mmi.ptMaxPosition.X += 2;
+                        mmi.ptMaxPosition.Y += 2;
+                        mmi.ptMaxSize.X -= 4;
+                        mmi.ptMaxSize.Y -= 4;
+                    }
+                }
             }
         }
 
@@ -102,6 +121,20 @@ public partial class MainWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll")]
+    private static extern uint SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct APPBARDATA
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public uint uCallbackMessage;
+        public uint uEdge;
+        public RECT rc;
+        public int lParam;
+    }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
