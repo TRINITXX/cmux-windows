@@ -14,10 +14,15 @@ namespace Cmux.Services;
 
 public sealed class AgentRuntimeService : IDisposable
 {
+    private static readonly Lazy<AgentRuntimeService> _instance = new(() => new AgentRuntimeService());
+    internal static AgentRuntimeService Instance => _instance.Value;
+
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeRuns = [];
     private readonly ConcurrentDictionary<string, string> _activeThreadByPane = [];
     private readonly ConcurrentDictionary<string, ConcurrentQueue<string>> _steeringPromptsByRunKey = [];
+
+    internal AgentConversationStoreService ConversationStore { get; } = new();
 
     public event Action<AgentRuntimeUpdate>? RuntimeUpdated;
 
@@ -97,7 +102,7 @@ public sealed class AgentRuntimeService : IDisposable
             && !string.IsNullOrWhiteSpace(activeRunThreadId)
             && string.Equals(activeRunThreadId, threadId, StringComparison.Ordinal);
 
-        App.AgentConversationStore.AppendMessage(new AgentConversationMessage
+        ConversationStore.AppendMessage(new AgentConversationMessage
         {
             ThreadId = threadId,
             Role = "user",
@@ -197,7 +202,7 @@ public sealed class AgentRuntimeService : IDisposable
                 if (string.IsNullOrWhiteSpace(finalText))
                     finalText = "No text response received.";
 
-                var assistantMessage = App.AgentConversationStore.AppendMessage(new AgentConversationMessage
+                var assistantMessage = ConversationStore.AppendMessage(new AgentConversationMessage
                 {
                     ThreadId = threadId,
                     Role = "assistant",
@@ -2062,7 +2067,7 @@ Available tools:
     {
         if (!string.IsNullOrWhiteSpace(explicitThreadId))
         {
-            var existing = App.AgentConversationStore.GetThread(explicitThreadId.Trim());
+            var existing = ConversationStore.GetThread(explicitThreadId.Trim());
             if (existing != null)
                 return existing.Id;
         }
@@ -2071,12 +2076,12 @@ Available tools:
             _activeThreadByPane.TryGetValue(runKey, out var activeThreadId) &&
             !string.IsNullOrWhiteSpace(activeThreadId))
         {
-            var existing = App.AgentConversationStore.GetThread(activeThreadId);
+            var existing = ConversationStore.GetThread(activeThreadId);
             if (existing != null)
                 return existing.Id;
         }
 
-        var created = App.AgentConversationStore.CreateThread(
+        var created = ConversationStore.CreateThread(
             context.WorkspaceId,
             context.SurfaceId,
             context.PaneId,
@@ -2113,7 +2118,7 @@ Available tools:
             return new AgentConversationContext([], estimatedNoHistory, budgetTokens, estimatedNoHistory >= thresholdTokens, false);
         }
 
-        var history = App.AgentConversationStore.GetMessages(threadId, maxMessages * 3)
+        var history = ConversationStore.GetMessages(threadId, maxMessages * 3)
             .Where(m => !string.IsNullOrWhiteSpace(m.Content))
             .Where(m =>
             {
@@ -2135,7 +2140,7 @@ Available tools:
             var summary = BuildCompactionSummary(older);
             if (!string.IsNullOrWhiteSpace(summary))
             {
-                var summaryMessage = App.AgentConversationStore.AppendMessage(new AgentConversationMessage
+                var summaryMessage = ConversationStore.AppendMessage(new AgentConversationMessage
                 {
                     ThreadId = threadId,
                     Role = "system",

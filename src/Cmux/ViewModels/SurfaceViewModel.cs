@@ -296,7 +296,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         if (!_sessions.TryGetValue(paneId, out var session))
             return false;
 
-        return App.AgentRuntime.TryHandlePaneCommand(
+        return Cmux.Services.AgentRuntimeService.Instance.TryHandlePaneCommand(
             command,
             new Cmux.Services.AgentPaneContext
             {
