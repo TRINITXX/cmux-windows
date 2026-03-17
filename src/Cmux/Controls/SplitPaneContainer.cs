@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using Cmux.Core.Models;
@@ -19,6 +20,10 @@ public class SplitPaneContainer : ContentControl
     private SurfaceViewModel? _surface;
     private readonly Dictionary<string, TerminalControl> _terminalCache = [];
     private readonly Dictionary<string, Border> _flashBorders = [];
+
+    // Drag-to-swap state
+    private string? _draggedPaneId;
+    private Point _paneDragStart;
 
     public event Action? SearchRequested;
 
@@ -251,6 +256,67 @@ public class SplitPaneContainer : ContentControl
         };
         Grid.SetColumn(titleText, 1);
 
+        // Inline rename TextBox (hidden by default)
+        var renameBox = new TextBox
+        {
+            FontSize = 11,
+            Foreground = GetThemeBrush("ForegroundBrush"),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        Grid.SetColumn(renameBox, 1);
+
+        // Double-click title to start inline rename
+        titleText.MouseLeftButtonDown += (s, e) =>
+        {
+            if (e.ClickCount == 2)
+            {
+                renameBox.Text = titleText.Text;
+                titleText.Visibility = Visibility.Collapsed;
+                renameBox.Visibility = Visibility.Visible;
+                renameBox.SelectAll();
+                renameBox.Focus();
+                e.Handled = true;
+            }
+        };
+
+        // Commit rename helper
+        void CommitRename()
+        {
+            if (renameBox.Visibility != Visibility.Visible) return;
+            var newName = renameBox.Text?.Trim();
+            renameBox.Visibility = Visibility.Collapsed;
+            titleText.Visibility = Visibility.Visible;
+            if (!string.IsNullOrEmpty(newName))
+                _surface?.SetPaneCustomName(paneId, newName);
+        }
+
+        // Cancel rename helper
+        void CancelRename()
+        {
+            renameBox.Visibility = Visibility.Collapsed;
+            titleText.Visibility = Visibility.Visible;
+        }
+
+        renameBox.KeyDown += (s, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                CommitRename();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                CancelRename();
+                e.Handled = true;
+            }
+        };
+
+        renameBox.LostFocus += (s, e) => CommitRename();
+
         // Close button
         var closeButton = new Button
         {
@@ -267,8 +333,74 @@ public class SplitPaneContainer : ContentControl
         closeButton.Click += (s, e) => _surface?.ClosePane(paneId);
         Grid.SetColumn(closeButton, 2);
 
+        // Drag-to-swap: mouse handlers on the focus indicator
+        focusIndicator.Cursor = Cursors.Hand;
+        focusIndicator.MouseLeftButtonDown += (s, e) =>
+        {
+            _draggedPaneId = paneId;
+            _paneDragStart = e.GetPosition(this);
+            e.Handled = true;
+        };
+        focusIndicator.MouseMove += (s, e) =>
+        {
+            if (e.LeftButton == MouseButtonState.Pressed && _draggedPaneId == paneId)
+            {
+                var pos = e.GetPosition(this);
+                var diff = pos - _paneDragStart;
+                if (Math.Abs(diff.X) > 5 || Math.Abs(diff.Y) > 5)
+                {
+                    var data = new DataObject(DataFormats.StringFormat, paneId);
+                    DragDrop.DoDragDrop(focusIndicator, data, DragDropEffects.Move);
+                    _draggedPaneId = null;
+                }
+            }
+        };
+
+        // Drop target: the header Border
+        header.AllowDrop = true;
+        var headerDefaultBg = header.Background;
+        header.DragOver += (s, e) =>
+        {
+            if (e.Data.GetDataPresent(DataFormats.StringFormat))
+            {
+                var sourcePaneId = e.Data.GetData(DataFormats.StringFormat) as string;
+                if (sourcePaneId != null && sourcePaneId != paneId)
+                {
+                    e.Effects = DragDropEffects.Move;
+                    header.Background = GetThemeBrush("AccentBrush");
+                }
+                else
+                {
+                    e.Effects = DragDropEffects.None;
+                }
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+            e.Handled = true;
+        };
+        header.DragLeave += (s, e) =>
+        {
+            header.Background = headerDefaultBg;
+        };
+        header.Drop += (s, e) =>
+        {
+            header.Background = headerDefaultBg;
+            if (e.Data.GetDataPresent(DataFormats.StringFormat))
+            {
+                var sourcePaneId = e.Data.GetData(DataFormats.StringFormat) as string;
+                if (sourcePaneId != null && sourcePaneId != paneId)
+                {
+                    _surface?.SwapPanes(sourcePaneId, paneId);
+                }
+            }
+            e.Handled = true;
+        };
+
         headerGrid.Children.Add(focusIndicator);
         headerGrid.Children.Add(titleText);
+        headerGrid.Children.Add(renameBox);
         headerGrid.Children.Add(closeButton);
         header.Child = headerGrid;
 

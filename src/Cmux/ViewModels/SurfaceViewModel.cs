@@ -178,6 +178,12 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RootNode));
     }
 
+    public void SwapPanes(string paneId1, string paneId2)
+    {
+        if (RootNode.SwapPanes(paneId1, paneId2))
+            OnPropertyChanged(nameof(RootNode));
+    }
+
     public IReadOnlyList<string> GetCommandHistory(string paneId)
     {
         return _paneCommandHistory.TryGetValue(paneId, out var history)
