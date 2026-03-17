@@ -231,14 +231,15 @@ public class SplitPaneContainer : ContentControl
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // Title
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) }); // Close button
 
-        // Focus indicator (shows which pane is focused)
+        // Focus indicator (shows which pane is focused) — also drag handle for swap
         var focusIndicator = new Border
         {
-            Width = 3,
-            Height = 12,
+            Width = 10,
+            Height = 18,
             CornerRadius = new CornerRadius(1.5),
-            Margin = new Thickness(0, 0, 6, 0),
+            Margin = new Thickness(0, 0, 4, 0),
             VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(3, 3, 3, 3),
             Background = terminal.IsPaneFocused
                 ? GetThemeBrush("AccentBrush")
                 : GetThemeBrush("DividerBrush"),
@@ -356,10 +357,12 @@ public class SplitPaneContainer : ContentControl
             }
         };
 
-        // Drop target: the header Border
+        // Drop target: the entire pane area (header handles visual feedback)
         header.AllowDrop = true;
         var headerDefaultBg = header.Background;
-        header.DragOver += (s, e) =>
+
+        // Shared drag handlers — used on both header and content border
+        void HandleDragOver(DragEventArgs e)
         {
             if (e.Data.GetDataPresent(DataFormats.StringFormat))
             {
@@ -370,33 +373,30 @@ public class SplitPaneContainer : ContentControl
                     header.Background = GetThemeBrush("AccentBrush");
                 }
                 else
-                {
                     e.Effects = DragDropEffects.None;
-                }
             }
             else
-            {
                 e.Effects = DragDropEffects.None;
-            }
             e.Handled = true;
-        };
-        header.DragLeave += (s, e) =>
-        {
-            header.Background = headerDefaultBg;
-        };
-        header.Drop += (s, e) =>
+        }
+
+        void HandleDragLeave(DragEventArgs e) => header.Background = headerDefaultBg;
+
+        void HandleDrop(DragEventArgs e)
         {
             header.Background = headerDefaultBg;
             if (e.Data.GetDataPresent(DataFormats.StringFormat))
             {
                 var sourcePaneId = e.Data.GetData(DataFormats.StringFormat) as string;
                 if (sourcePaneId != null && sourcePaneId != paneId)
-                {
                     _surface?.SwapPanes(sourcePaneId, paneId);
-                }
             }
             e.Handled = true;
-        };
+        }
+
+        header.DragOver += (s, e) => HandleDragOver(e);
+        header.DragLeave += (s, e) => HandleDragLeave(e);
+        header.Drop += (s, e) => HandleDrop(e);
 
         headerGrid.Children.Add(focusIndicator);
         headerGrid.Children.Add(titleText);
@@ -411,11 +411,15 @@ public class SplitPaneContainer : ContentControl
         var contentBorder = new Border
         {
             Child = panel,
+            AllowDrop = true,
             BorderBrush = terminal.IsPaneFocused
                 ? new SolidColorBrush(Color.FromArgb(153, focusedAccent.R, focusedAccent.G, focusedAccent.B))
                 : GetThemeBrush("BorderBrush"),
             BorderThickness = new Thickness(1),
         };
+        contentBorder.DragOver += (s, e) => HandleDragOver(e);
+        contentBorder.DragLeave += (s, e) => HandleDragLeave(e);
+        contentBorder.Drop += (s, e) => HandleDrop(e);
 
         // Flash overlay border for focus-switch animation
         // Always create a fresh border to avoid "already child of another element" errors

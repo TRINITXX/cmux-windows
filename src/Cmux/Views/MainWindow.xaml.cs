@@ -228,6 +228,19 @@ public partial class MainWindow : Window
         // Update maximize/restore icon
         MaxRestoreIcon.Text = maximized ? "\uE923" : "\uE922";
         MaxRestoreButton.ToolTip = maximized ? "Restore" : "Maximize";
+
+        // Fix: respect taskbar when maximized with custom WindowChrome
+        if (maximized)
+        {
+            MaxHeight = SystemParameters.MaximizedPrimaryScreenHeight;
+            MaxWidth = SystemParameters.MaximizedPrimaryScreenWidth;
+        }
+        else
+        {
+            MaxHeight = double.PositiveInfinity;
+            MaxWidth = double.PositiveInfinity;
+        }
+
         UpdateWindowClip();
     }
 
