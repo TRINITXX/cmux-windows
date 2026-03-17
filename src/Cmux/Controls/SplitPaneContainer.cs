@@ -286,15 +286,14 @@ public class SplitPaneContainer : ContentControl
         };
 
         // Flash overlay border for focus-switch animation
-        if (!_flashBorders.TryGetValue(paneId, out var flashBorder))
+        // Always create a fresh border to avoid "already child of another element" errors
+        var flashBorder = new Border
         {
-            flashBorder = new Border();
-            _flashBorders[paneId] = flashBorder;
-        }
-
-        flashBorder.BorderThickness = new Thickness(0);
-        flashBorder.Opacity = 0;
-        flashBorder.IsHitTestVisible = false;
+            BorderThickness = new Thickness(0),
+            Opacity = 0,
+            IsHitTestVisible = false
+        };
+        _flashBorders[paneId] = flashBorder;
 
         var wrapper = new Grid();
         wrapper.Children.Add(contentBorder);
