@@ -22,7 +22,11 @@
                 <DataTemplate DataType="{x:Type vm:SurfaceViewModel}">
                     <Border x:Name="tabBorder" Padding="14,6" Cursor="Hand"
                             Margin="2,4,2,4" CornerRadius="6"
-                            MouseLeftButtonDown="Tab_Click">
+                            MouseLeftButtonDown="Tab_Click"
+                            MouseMove="Tab_MouseMove"
+                            AllowDrop="True"
+                            Drop="Tab_Drop"
+                            DragOver="Tab_DragOver">
                         <Border.Background>
                             <SolidColorBrush x:Name="tabBg" Color="Transparent" />
                         </Border.Background>

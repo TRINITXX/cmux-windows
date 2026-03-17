@@ -574,8 +574,8 @@ public partial class MainWindow : Window
     }
 
     // Toolbar handlers
-    private void ToolbarSplitRight_Click(object sender, RoutedEventArgs e) => ViewModel.SelectedWorkspace?.SelectedSurface?.SplitRight();
-    private void ToolbarSplitDown_Click(object sender, RoutedEventArgs e) => ViewModel.SelectedWorkspace?.SelectedSurface?.SplitDown();
+    private void ToolbarSplitRight_Click(object sender, RoutedEventArgs e) { ViewModel.SelectedWorkspace?.SelectedSurface?.SplitRight(); LaunchClaudeInFocusedPane(); }
+    private void ToolbarSplitDown_Click(object sender, RoutedEventArgs e) { ViewModel.SelectedWorkspace?.SelectedSurface?.SplitDown(); LaunchClaudeInFocusedPane(); }
     private void ToolbarLayout2Col_Click(object sender, RoutedEventArgs e) { ApplyLayout(2, 1); LaunchClaudeInAllPanes(); }
     private void ToolbarLayoutGrid_Click(object sender, RoutedEventArgs e) { ApplyLayout(2, 2); LaunchClaudeInAllPanes(); }
     private void ToolbarLayoutMainStack_Click(object sender, RoutedEventArgs e) { ApplyMainStackLayout(); LaunchClaudeInAllPanes(); }
@@ -632,6 +632,24 @@ public partial class MainWindow : Window
             });
         });
     }
+    private void LaunchClaudeInFocusedPane()
+    {
+        var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
+        if (surface?.FocusedPaneId == null) return;
+
+        var command = "claude --dangerously-skip-permissions --effort max --worktree";
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (surface.FocusedPaneId != null)
+                    surface.SendCommandToPane(surface.FocusedPaneId, command);
+            });
+        });
+    }
+
     private void ToolbarZoom_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.SelectedWorkspace?.SelectedSurface?.ToggleZoom();

@@ -12,6 +12,9 @@ namespace Cmux.Controls;
 public partial class SurfaceTabBar : UserControl
 {
     private SurfaceViewModel? _renamingSurface;
+    private Point _dragStartPoint;
+    private SurfaceViewModel? _draggingSurface;
+    private bool _isDragging;
 
     public event Action<string>? SearchTextChanged;
     public event Action? NextMatchRequested;
@@ -142,6 +145,7 @@ public partial class SurfaceTabBar : UserControl
         {
             if (e.ClickCount == 2)
             {
+                _draggingSurface = null;
                 _renamingSurface = surface;
                 TabRenameBox.Text = surface.Name;
                 TabRenameBox.Visibility = Visibility.Visible;
@@ -150,9 +154,65 @@ public partial class SurfaceTabBar : UserControl
                 e.Handled = true;
                 return;
             }
+
+            // Capture drag start for single click only
+            _dragStartPoint = e.GetPosition(this);
+            _draggingSurface = surface;
+
             if (DataContext is WorkspaceViewModel workspace)
                 workspace.SelectedSurface = surface;
         }
+    }
+
+    private void Tab_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _draggingSurface == null || _isDragging)
+            return;
+
+        var pos = e.GetPosition(this);
+        var diff = pos - _dragStartPoint;
+
+        if (Math.Abs(diff.X) > 5 || Math.Abs(diff.Y) > 5)
+        {
+            _isDragging = true;
+            DragDrop.DoDragDrop((DependencyObject)sender, _draggingSurface, DragDropEffects.Move);
+            _isDragging = false;
+            _draggingSurface = null;
+        }
+    }
+
+    private void Tab_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(typeof(SurfaceViewModel)))
+        {
+            e.Effects = DragDropEffects.Move;
+            if (sender is Border border)
+                border.Background = new SolidColorBrush(Color.FromArgb(0x40, 0x63, 0x66, 0xF1));
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+        e.Handled = true;
+    }
+
+    private void Tab_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(SurfaceViewModel)) is SurfaceViewModel source &&
+            sender is FrameworkElement fe && fe.DataContext is SurfaceViewModel target &&
+            source != target &&
+            DataContext is WorkspaceViewModel workspace)
+        {
+            var surfaces = workspace.Surfaces;
+            var oldIndex = surfaces.IndexOf(source);
+            var newIndex = surfaces.IndexOf(target);
+            if (oldIndex >= 0 && newIndex >= 0)
+                surfaces.Move(oldIndex, newIndex);
+        }
+
+        // Reset drop target visual
+        if (sender is Border b)
+            b.Background = new SolidColorBrush(Colors.Transparent);
     }
 
     private void CloseTab_Click(object sender, RoutedEventArgs e)
