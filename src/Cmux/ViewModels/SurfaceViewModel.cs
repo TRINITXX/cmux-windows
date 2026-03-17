@@ -509,6 +509,21 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                     AppendToCommandHistory(paneId, sanitized);
             }
         };
+
+        App.ClaudeStatusService.RegisterPane(paneId, session);
+        App.PortDetectionService.RegisterPane(paneId, session);
+    }
+
+    public void SendCommandToPane(string paneId, string command)
+    {
+        if (_sessions.TryGetValue(paneId, out var session))
+            session.Write(command + "\r");
+    }
+
+    public void SendCommandToAllPanes(string command)
+    {
+        foreach (var (_, session) in _sessions)
+            session.Write(command + "\r");
     }
 
     [RelayCommand]
@@ -564,6 +579,8 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         {
             if (_daemonPanes.Remove(paneId))
                 _ = App.DaemonClient.CloseSessionAsync(paneId);
+            App.ClaudeStatusService.UnregisterPane(paneId);
+            App.PortDetectionService.UnregisterPane(paneId);
             session.Dispose();
             _sessions.Remove(paneId);
         }
@@ -641,6 +658,11 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         daemon.BellReceived -= OnDaemonBellReceived;
         daemon.Disconnected -= OnDaemonDisconnected;
 
+        foreach (var paneId in _sessions.Keys)
+        {
+            App.ClaudeStatusService.UnregisterPane(paneId);
+            App.PortDetectionService.UnregisterPane(paneId);
+        }
         foreach (var session in _sessions.Values)
             session.Dispose();
         _sessions.Clear();

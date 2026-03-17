@@ -1,3 +1,5 @@
+using Cmux.Core.Models;
+
 namespace Cmux.Core.Config;
 
 /// <summary>
@@ -53,6 +55,13 @@ public class CmuxSettings
     public Dictionary<string, string> KeyBindings { get; set; } = [];
     public List<string> RecentDirectories { get; set; } = [];
     public AgentSettings Agent { get; set; } = new();
+
+    // ── Custom ────────────────────────────────────────────────
+
+    public string SshHost { get; set; } = "trinitx@192.168.1.32";
+    public string SshKeyPath { get; set; } = "~/.ssh/id_ed25519";
+    public bool AutoOpenBrowserOnDevServer { get; set; } = true;
+    public List<WorkspaceTemplate> WorkspaceTemplates { get; set; } = [];
 }
 
 /// <summary>
