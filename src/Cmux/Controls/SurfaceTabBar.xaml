@@ -40,21 +40,26 @@
                         </Border.ContextMenu>
                         <Grid>
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
+                            <Ellipse x:Name="StatusDot" Grid.Column="0"
+                                     Width="8" Height="8" Margin="0,0,6,0"
+                                     VerticalAlignment="Center"
+                                     Visibility="Collapsed" />
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12"
                                        Foreground="{StaticResource ForegroundDimBrush}"
                                        VerticalAlignment="Center"
                                        x:Name="tabText" />
-                            <Button Grid.Column="1" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets"
+                            <Button Grid.Column="2" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets"
                                     FontSize="8" Margin="8,0,0,0" Padding="2"
                                     Opacity="0" x:Name="closeBtn"
                                     Style="{StaticResource CmuxButton}"
                                     Click="CloseTab_Click" Tag="{Binding}" />
 
                             <!-- Active tab bottom accent line -->
-                            <Rectangle x:Name="activeIndicator" Grid.ColumnSpan="2"
+                            <Rectangle x:Name="activeIndicator" Grid.ColumnSpan="3"
                                        Height="2" VerticalAlignment="Bottom" Margin="0,0,0,-4"
                                        RadiusX="1" RadiusY="1" Opacity="0">
                                 <Rectangle.Fill>

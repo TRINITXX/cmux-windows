@@ -181,6 +181,25 @@ public partial class MainWindow : Window
         // Monitor daemon connection changes
         App.DaemonClient.Connected += () => Dispatcher.BeginInvoke(UpdateDaemonStatus);
         App.DaemonClient.Disconnected += () => Dispatcher.BeginInvoke(UpdateDaemonStatus);
+
+        PopulateTemplateMenu();
+
+        // Auto-open browser when dev server starts
+        App.PortDetectionService.DevServerStarted += (paneId, url) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            });
+        };
     }
 
     private void UpdateDaemonStatus()
@@ -193,6 +212,55 @@ public partial class MainWindow : Window
         DaemonStatusBorder.ToolTip = connected
             ? "Connected to cmux-daemon — sessions persist across restarts"
             : "Running locally — sessions will not persist";
+    }
+
+    private void PopulateTemplateMenu()
+    {
+        TemplateMenu.Items.Clear();
+        var templates = App.TemplateService.GetTemplates();
+        foreach (var template in templates)
+        {
+            var item = new MenuItem
+            {
+                Header = template.Name,
+                Tag = template,
+                ToolTip = template.Directory,
+            };
+            if (!string.IsNullOrWhiteSpace(template.IconGlyph))
+            {
+                item.Icon = new TextBlock
+                {
+                    Text = template.IconGlyph,
+                    FontFamily = new System.Windows.Media.FontFamily("Segoe MDL2 Assets"),
+                    FontSize = 12,
+                };
+            }
+            item.Click += TemplateMenuItem_Click;
+            TemplateMenu.Items.Add(item);
+        }
+    }
+
+    private void TemplateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.ContextMenu != null)
+        {
+            button.ContextMenu.PlacementTarget = button;
+            button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+            button.ContextMenu.IsOpen = true;
+        }
+    }
+
+    private void TemplateMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem item && item.Tag is Cmux.Core.Models.WorkspaceTemplate template)
+        {
+            ViewModel.CreateWorkspaceFromTemplate(template);
+        }
+    }
+
+    private void NewWorkspaceWithFolder_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.CreateWorkspaceWithFolderPicker();
     }
 
     private void UpdateWindowChrome()
@@ -647,10 +715,62 @@ public partial class MainWindow : Window
     private void ToolbarSplitRight_Click(object sender, RoutedEventArgs e) => ViewModel.SelectedWorkspace?.SelectedSurface?.SplitRight();
     private void ToolbarSplitDown_Click(object sender, RoutedEventArgs e) => ViewModel.SelectedWorkspace?.SelectedSurface?.SplitDown();
     private void ToggleAgentChat_Click(object sender, RoutedEventArgs e) => ToggleAgentChat();
-    private void ToolbarLayout2Col_Click(object sender, RoutedEventArgs e) => ApplyLayout(2, 1);
-    private void ToolbarLayoutGrid_Click(object sender, RoutedEventArgs e) => ApplyLayout(2, 2);
-    private void ToolbarLayoutMainStack_Click(object sender, RoutedEventArgs e) => ApplyMainStackLayout();
+    private void ToolbarLayout2Col_Click(object sender, RoutedEventArgs e) { ApplyLayout(2, 1); LaunchClaudeInAllPanes(); }
+    private void ToolbarLayoutGrid_Click(object sender, RoutedEventArgs e) { ApplyLayout(2, 2); LaunchClaudeInAllPanes(); }
+    private void ToolbarLayoutMainStack_Click(object sender, RoutedEventArgs e) { ApplyMainStackLayout(); LaunchClaudeInAllPanes(); }
     private void ToolbarEqualize_Click(object sender, RoutedEventArgs e) => ViewModel.SelectedWorkspace?.SelectedSurface?.EqualizePanes();
+
+    private void ToolbarPowerShell_Click(object sender, RoutedEventArgs e)
+    {
+        var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
+        if (surface == null) return;
+        surface.SplitRight();
+    }
+
+    private void ToolbarSshMac_Click(object sender, RoutedEventArgs e)
+    {
+        var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
+        if (surface == null) return;
+        surface.SplitRight();
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var settings = Cmux.Core.Config.SettingsService.Current;
+                var sshCmd = $"ssh {settings.SshHost}";
+                if (surface.FocusedPaneId != null)
+                    surface.SendCommandToPane(surface.FocusedPaneId, sshCmd);
+            });
+        });
+    }
+
+    private void LaunchClaudeInAllPanes()
+    {
+        var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
+        if (surface == null) return;
+
+        var cwd = ViewModel.SelectedWorkspace?.WorkingDirectory ?? "";
+        var command = "claude --dangerously-skip-permissions --effort max --worktree";
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(800);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (!string.IsNullOrWhiteSpace(cwd))
+                    surface.SendCommandToAllPanes($"cd \"{cwd}\"");
+
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(300);
+                    Application.Current.Dispatcher.Invoke(() =>
+                        surface.SendCommandToAllPanes(command));
+                });
+            });
+        });
+    }
     private void ToolbarZoom_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.SelectedWorkspace?.SelectedSurface?.ToggleZoom();

@@ -348,6 +348,38 @@
                                     </StackPanel>
                                 </Button>
 
+                                <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="TemplateButton" Grid.Column="0"
+                                            Style="{StaticResource CmuxButton}"
+                                            HorizontalAlignment="Stretch" Margin="0,0,2,0"
+                                            ToolTip="New from Template"
+                                            Click="TemplateButton_Click">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE8F1;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                                       Margin="0,0,6,0" Opacity="0.6" />
+                                            <TextBlock Text="Template" FontSize="12" />
+                                        </StackPanel>
+                                        <Button.ContextMenu>
+                                            <ContextMenu x:Name="TemplateMenu" />
+                                        </Button.ContextMenu>
+                                    </Button>
+                                    <Button Grid.Column="1"
+                                            Style="{StaticResource CmuxButton}"
+                                            HorizontalAlignment="Stretch" Margin="2,0,0,0"
+                                            ToolTip="New Workspace (Choose Folder)"
+                                            Click="NewWorkspaceWithFolder_Click">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                                       Margin="0,0,6,0" Opacity="0.6" />
+                                            <TextBlock Text="Folder" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
                                 <Button Command="{Binding ToggleNotificationPanelCommand}"
                                         Style="{StaticResource CmuxButton}"
                                         HorizontalAlignment="Stretch" Margin="0,1">
@@ -436,6 +468,15 @@
                             <Button x:Name="ToolbarAgentChatButton" Style="{StaticResource IconButton}" ToolTip="Toggle Agent Chat (Ctrl+Shift+A)"
                                     Click="ToggleAgentChat_Click">
                                 <TextBlock Text="&#xE11B;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                            </Button>
+                            <Rectangle Width="1" Height="16" Fill="{StaticResource BorderBrush}" Margin="4,0" />
+                            <Button Style="{StaticResource IconButton}" ToolTip="New PowerShell Pane"
+                                    Click="ToolbarPowerShell_Click">
+                                <TextBlock Text="&#xE756;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" ToolTip="SSH to macOS VM"
+                                    Click="ToolbarSshMac_Click">
+                                <TextBlock Text="&#xE838;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
                             </Button>
                         </StackPanel>
                     </Border>

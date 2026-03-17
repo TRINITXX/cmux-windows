@@ -86,6 +86,84 @@ public partial class MainViewModel : ObservableObject
         SelectedWorkspace = vm;
     }
 
+    public void CreateWorkspaceFromTemplate(WorkspaceTemplate template)
+    {
+        var workspace = new Workspace
+        {
+            Name = template.Name,
+            IconGlyph = template.IconGlyph ?? "\uE8A5",
+            AccentColor = template.AccentColor ?? "#FF818CF8",
+            WorkingDirectory = template.Directory,
+        };
+        var surface = new Surface { Name = "Terminal 1" };
+        workspace.Surfaces.Add(surface);
+        workspace.SelectedSurface = surface;
+
+        var vm = new WorkspaceViewModel(workspace, _notificationService);
+        Workspaces.Add(vm);
+        SelectedWorkspace = vm;
+
+        // Send cd command after terminal is ready, then startup command
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var surfaceVm = vm.SelectedSurface;
+                if (surfaceVm?.FocusedPaneId != null)
+                {
+                    surfaceVm.SendCommandToPane(surfaceVm.FocusedPaneId, $"cd \"{template.Directory}\"");
+                    if (!string.IsNullOrWhiteSpace(template.StartupCommand))
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            await Task.Delay(300);
+                            Application.Current.Dispatcher.Invoke(() =>
+                                surfaceVm.SendCommandToPane(surfaceVm.FocusedPaneId!, template.StartupCommand));
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    public void CreateWorkspaceWithFolderPicker()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Choose workspace folder",
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        var folderName = System.IO.Path.GetFileName(dialog.FolderName) ?? "Workspace";
+        var workspace = new Workspace
+        {
+            Name = folderName,
+            WorkingDirectory = dialog.FolderName,
+        };
+        var surface = new Surface { Name = "Terminal 1" };
+        workspace.Surfaces.Add(surface);
+        workspace.SelectedSurface = surface;
+
+        var vm = new WorkspaceViewModel(workspace, _notificationService);
+        Workspaces.Add(vm);
+        SelectedWorkspace = vm;
+
+        // Send cd command after terminal is ready
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                var surfaceVm = vm.SelectedSurface;
+                if (surfaceVm?.FocusedPaneId != null)
+                    surfaceVm.SendCommandToPane(surfaceVm.FocusedPaneId, $"cd \"{dialog.FolderName}\"");
+            });
+        });
+    }
+
     public void DuplicateWorkspace(WorkspaceViewModel source)
     {
         var clone = new Workspace

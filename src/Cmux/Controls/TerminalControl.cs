@@ -1425,6 +1425,19 @@ public class TerminalControl : FrameworkElement
         search.Click += (_, _) => SearchRequested?.Invoke();
         menu.Items.Add(search);
 
+        menu.Items.Add(new Separator());
+
+        // Open in Windows Explorer
+        var openExplorerItem = new MenuItem { Header = "Open in Windows Explorer" };
+        openExplorerItem.Icon = MakeIcon("\uE838");
+        openExplorerItem.Click += (_, _) =>
+        {
+            var cwd = _session?.WorkingDirectory;
+            if (!string.IsNullOrWhiteSpace(cwd) && System.IO.Directory.Exists(cwd))
+                System.Diagnostics.Process.Start("explorer.exe", cwd);
+        };
+        menu.Items.Add(openExplorerItem);
+
         menu.IsOpen = true;
         e.Handled = true;
     }

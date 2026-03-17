@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Cmux.Core.Models;
 using Cmux.Core.Config;
 using Cmux.Core.Terminal;
@@ -17,6 +18,7 @@ public class SplitPaneContainer : ContentControl
 {
     private SurfaceViewModel? _surface;
     private readonly Dictionary<string, TerminalControl> _terminalCache = [];
+    private readonly Dictionary<string, Border> _flashBorders = [];
 
     public event Action? SearchRequested;
 
@@ -42,6 +44,7 @@ public class SplitPaneContainer : ContentControl
         // Clear terminal cache when switching surfaces/workspaces
         // This prevents reusing terminals from a different workspace
         _terminalCache.Clear();
+        _flashBorders.Clear();
 
         _surface = e.NewValue as SurfaceViewModel;
 
@@ -87,6 +90,13 @@ public class SplitPaneContainer : ContentControl
         foreach (var (paneId, terminal) in _terminalCache)
         {
             terminal.IsPaneFocused = paneId == _surface.FocusedPaneId;
+        }
+
+        // Flash the newly focused pane
+        if (_surface.FocusedPaneId != null
+            && _flashBorders.TryGetValue(_surface.FocusedPaneId, out var fb))
+        {
+            FlashPane(fb);
         }
     }
 
@@ -266,7 +276,7 @@ public class SplitPaneContainer : ContentControl
         panel.Children.Add(terminal);
 
         var focusedAccent = GetThemeColor("AccentColor");
-        return new Border
+        var contentBorder = new Border
         {
             Child = panel,
             BorderBrush = terminal.IsPaneFocused
@@ -274,6 +284,23 @@ public class SplitPaneContainer : ContentControl
                 : GetThemeBrush("BorderBrush"),
             BorderThickness = new Thickness(1),
         };
+
+        // Flash overlay border for focus-switch animation
+        if (!_flashBorders.TryGetValue(paneId, out var flashBorder))
+        {
+            flashBorder = new Border();
+            _flashBorders[paneId] = flashBorder;
+        }
+
+        flashBorder.BorderThickness = new Thickness(0);
+        flashBorder.Opacity = 0;
+        flashBorder.IsHitTestVisible = false;
+
+        var wrapper = new Grid();
+        wrapper.Children.Add(contentBorder);
+        wrapper.Children.Add(flashBorder);
+
+        return wrapper;
     }
 
 
@@ -364,6 +391,29 @@ public class SplitPaneContainer : ContentControl
         }
 
         return grid;
+    }
+
+    private void FlashPane(Border flashBorder)
+    {
+        flashBorder.BorderBrush = new SolidColorBrush(Colors.DodgerBlue);
+        flashBorder.BorderThickness = new Thickness(2);
+        flashBorder.Opacity = 1;
+
+        var animation = new DoubleAnimation
+        {
+            From = 1.0,
+            To = 0.0,
+            Duration = TimeSpan.FromMilliseconds(400),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        animation.Completed += (_, _) =>
+        {
+            flashBorder.Opacity = 0;
+            flashBorder.BorderThickness = new Thickness(0);
+        };
+
+        flashBorder.BeginAnimation(UIElement.OpacityProperty, animation);
     }
 
     /// <summary>
