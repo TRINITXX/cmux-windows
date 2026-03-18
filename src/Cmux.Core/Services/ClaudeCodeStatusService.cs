@@ -97,15 +97,15 @@ public class ClaudeCodeStatusService : IDisposable
             }
 
             // Claude is running and this pane has recent activity
-            if (notifAge < 60 && outputAge > 2)
+            if (outputAge < 3)
             {
-                // Got a notification/BEL and output stopped = waiting for input
-                TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
-            }
-            else if (outputAge < 3)
-            {
-                // Output flowing = working
+                // Output flowing right now = working
                 TransitionTo(paneId, state, ClaudeStatus.Working);
+            }
+            else if (outputAge > 5 && outputAge < 30)
+            {
+                // No output for 5+ seconds but had recent activity = waiting for input
+                TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
             }
             // else: keep current state to avoid flicker
         }
