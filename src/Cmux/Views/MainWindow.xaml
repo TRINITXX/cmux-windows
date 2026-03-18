@@ -482,6 +482,23 @@
                                     Click="ToolbarPowerShell_Click">
                                 <TextBlock Text="&#xE756;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
                             </Button>
+                            <Rectangle Width="1" Height="16" Fill="{StaticResource BorderBrush}" Margin="4,0" />
+                            <Button Style="{StaticResource IconButton}" ToolTip="Expo Start (--clear)"
+                                    Click="ToolbarExpoStart_Click">
+                                <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="11" />
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" ToolTip="EAS Build iOS Dev"
+                                    Click="ToolbarEasBuildDev_Click">
+                                <TextBlock Text="&#xEC7A;" FontFamily="Segoe MDL2 Assets" FontSize="11" />
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" ToolTip="EAS Build iOS Preview"
+                                    Click="ToolbarEasBuildPreview_Click">
+                                <TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" FontSize="11" />
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" ToolTip="EAS Update iOS Preview"
+                                    Click="ToolbarEasUpdate_Click">
+                                <TextBlock Text="&#xE898;" FontFamily="Segoe MDL2 Assets" FontSize="11" />
+                            </Button>
                         </StackPanel>
                     </Border>
 

@@ -713,6 +713,46 @@ public partial class MainWindow : Window
             ws.SelectedSurface.Name = "PowerShell";
     }
 
+    private void OpenNewTabWithCommand(string tabName, string command)
+    {
+        var ws = ViewModel.SelectedWorkspace;
+        if (ws == null) return;
+        ws.CreateNewSurface();
+        var surface = ws.SelectedSurface;
+        if (surface == null) return;
+        surface.Name = tabName;
+
+        var cwd = ws.WorkingDirectory ?? "";
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500);
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (surface.FocusedPaneId == null) return;
+                if (!string.IsNullOrWhiteSpace(cwd))
+                    surface.SendCommandToPane(surface.FocusedPaneId, $"cd \"{cwd}\"");
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(300);
+                    Application.Current.Dispatcher.Invoke(() =>
+                        surface.SendCommandToPane(surface.FocusedPaneId!, command));
+                });
+            });
+        });
+    }
+
+    private void ToolbarExpoStart_Click(object sender, RoutedEventArgs e)
+        => OpenNewTabWithCommand("Expo Start", "npx expo start --clear");
+
+    private void ToolbarEasBuildPreview_Click(object sender, RoutedEventArgs e)
+        => OpenNewTabWithCommand("Build Preview", "eas build --platform ios --profile preview");
+
+    private void ToolbarEasBuildDev_Click(object sender, RoutedEventArgs e)
+        => OpenNewTabWithCommand("Build Dev", "eas build --platform ios --profile development");
+
+    private void ToolbarEasUpdate_Click(object sender, RoutedEventArgs e)
+        => OpenNewTabWithCommand("EAS Update", "eas update --platform ios --branch preview --environment preview");
+
     private static readonly string VmxPath = @"C:\Users\TRINITX\Documents\Virtual Machines\macOS 26\macOS 26.vmx";
     private static readonly string VmRunPath = @"C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe";
 
