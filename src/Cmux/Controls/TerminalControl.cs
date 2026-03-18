@@ -126,7 +126,8 @@ public class TerminalControl : FrameworkElement
         AddLogicalChild(_visual);
 
         _fontSize = _theme.FontSize;
-        _typeface = new Typeface(new FontFamily(_theme.FontFamily), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        // Font family with fallbacks for Unicode block/braille characters (QR codes, box drawing)
+        _typeface = new Typeface(new FontFamily($"{_theme.FontFamily}, Segoe UI Symbol, Segoe UI Emoji, Arial Unicode MS"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
 
         var settings = SettingsService.Current;
         _cursorStyle = settings.CursorStyle;
@@ -347,12 +348,14 @@ public class TerminalControl : FrameworkElement
         _typefaceBoldItalic = null;
     }
 
+    private static readonly string FontFallbacks = ", Segoe UI Symbol, Segoe UI Emoji, Arial Unicode MS";
+
     private Typeface GetTypeface(bool bold, bool italic)
     {
         if (!bold && !italic) return _typeface;
-        if (bold && !italic) return _typefaceBold ??= new Typeface(new FontFamily(_theme.FontFamily), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
-        if (!bold && italic) return _typefaceItalic ??= new Typeface(new FontFamily(_theme.FontFamily), FontStyles.Italic, FontWeights.Normal, FontStretches.Normal);
-        return _typefaceBoldItalic ??= new Typeface(new FontFamily(_theme.FontFamily), FontStyles.Italic, FontWeights.Bold, FontStretches.Normal);
+        if (bold && !italic) return _typefaceBold ??= new Typeface(new FontFamily(_theme.FontFamily + FontFallbacks), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+        if (!bold && italic) return _typefaceItalic ??= new Typeface(new FontFamily(_theme.FontFamily + FontFallbacks), FontStyles.Italic, FontWeights.Normal, FontStretches.Normal);
+        return _typefaceBoldItalic ??= new Typeface(new FontFamily(_theme.FontFamily + FontFallbacks), FontStyles.Italic, FontWeights.Bold, FontStretches.Normal);
     }
 
     private void Render()
@@ -1556,7 +1559,7 @@ public class TerminalControl : FrameworkElement
     public void UpdateTheme(GhosttyTheme theme)
     {
         _theme = theme;
-        _typeface = new Typeface(new FontFamily(theme.FontFamily), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        _typeface = new Typeface(new FontFamily(theme.FontFamily + FontFallbacks), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         _fontSize = theme.FontSize;
         InvalidateRenderCaches();
         CalculateCellSize();
@@ -1589,7 +1592,7 @@ public class TerminalControl : FrameworkElement
         _cursorStyle = settings.CursorStyle;
         _cursorBlink = settings.CursorBlink;
 
-        _typeface = new Typeface(new FontFamily(fontFamily), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        _typeface = new Typeface(new FontFamily(fontFamily + FontFallbacks), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
         InvalidateRenderCaches();
         CalculateCellSize();
         CalculateTerminalSize();
