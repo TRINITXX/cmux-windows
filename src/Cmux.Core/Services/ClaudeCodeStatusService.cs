@@ -14,6 +14,7 @@ public class ClaudeCodeStatusService : IDisposable
 
     public ClaudeCodeStatusService()
     {
+        Log("=== ClaudeCodeStatusService STARTED ===");
         _pollTimer = new System.Timers.Timer(2000);
         _pollTimer.Elapsed += (_, _) => PollStatus();
         _pollTimer.Start();

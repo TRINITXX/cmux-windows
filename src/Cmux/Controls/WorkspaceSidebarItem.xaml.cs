@@ -21,40 +21,27 @@ public partial class WorkspaceSidebarItem : UserControl
 
     private void OnClaudeStatusChanged(string paneId, ClaudeStatus oldStatus, ClaudeStatus newStatus)
     {
-        if (Vm == null) return;
-
-        // Check if this workspace contains this pane
-        var hasPaneInWorkspace = false;
-        foreach (var surface in Vm.Surfaces)
+        // Always update on UI thread — StatusChanged fires from timer thread
+        Dispatcher.BeginInvoke(() =>
         {
-            var leaves = surface.RootNode?.GetLeaves();
-            if (leaves == null) continue;
-            if (leaves.Any(l => l.PaneId == paneId))
+            if (Vm == null) return;
+
+            // Find worst status across all panes in this workspace
+            var worstStatus = ClaudeStatus.Idle;
+            foreach (var surface in Vm.Surfaces)
             {
-                hasPaneInWorkspace = true;
-                break;
+                var leaves = surface.RootNode?.GetLeaves();
+                if (leaves == null) continue;
+                foreach (var leaf in leaves)
+                {
+                    if (leaf.PaneId == null) continue;
+                    var status = App.ClaudeStatusService.GetStatus(leaf.PaneId);
+                    if (status == ClaudeStatus.Working) { worstStatus = ClaudeStatus.Working; break; }
+                    if (status == ClaudeStatus.WaitingForInput) worstStatus = ClaudeStatus.WaitingForInput;
+                }
+                if (worstStatus == ClaudeStatus.Working) break;
             }
-        }
-        if (!hasPaneInWorkspace) return;
 
-        // Get worst status across all panes in workspace
-        var worstStatus = ClaudeStatus.Idle;
-        foreach (var surface in Vm.Surfaces)
-        {
-            var leaves = surface.RootNode?.GetLeaves();
-            if (leaves == null) continue;
-            foreach (var leaf in leaves)
-            {
-                if (leaf.PaneId == null) continue;
-                var status = App.ClaudeStatusService.GetStatus(leaf.PaneId);
-                if (status == ClaudeStatus.Working) { worstStatus = ClaudeStatus.Working; break; }
-                if (status == ClaudeStatus.WaitingForInput) worstStatus = ClaudeStatus.WaitingForInput;
-            }
-            if (worstStatus == ClaudeStatus.Working) break;
-        }
-
-        Dispatcher.Invoke(() =>
-        {
             switch (worstStatus)
             {
                 case ClaudeStatus.Working:
