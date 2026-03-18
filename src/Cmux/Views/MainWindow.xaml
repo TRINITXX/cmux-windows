@@ -395,29 +395,6 @@
                                     </Button>
                                 </Grid>
 
-                                <Button Command="{Binding ToggleNotificationPanelCommand}"
-                                        Style="{StaticResource CmuxButton}"
-                                        HorizontalAlignment="Stretch" Margin="0,1">
-                                    <Grid>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="&#xEA8F;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                                       Margin="0,0,8,0" Opacity="0.6" />
-                                            <TextBlock Text="Notifications" FontSize="12" />
-                                        </StackPanel>
-                                        <Border CornerRadius="10"
-                                                Padding="6,2" HorizontalAlignment="Right"
-                                                Visibility="{Binding TotalUnreadCount, Converter={StaticResource IntToVisibility}}">
-                                            <Border.Background>
-                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                                    <GradientStop Color="#FF6366F1" Offset="0" />
-                                                    <GradientStop Color="#FFA78BFA" Offset="1" />
-                                                </LinearGradientBrush>
-                                            </Border.Background>
-                                            <TextBlock Text="{Binding TotalUnreadCount}" FontSize="10"
-                                                       Foreground="White" FontWeight="SemiBold" />
-                                        </Border>
-                                    </Grid>
-                                </Button>
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -525,11 +502,6 @@
                             DataContext="{Binding SelectedWorkspace.SelectedSurface}" />
                     </ContentControl>
 
-                    <!-- Notification panel overlay -->
-                    <controls:NotificationPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
-                        HorizontalAlignment="Right"
-                        Visibility="{Binding NotificationPanelVisible, Converter={StaticResource BoolToVisibility}}"
-                        DataContext="{Binding}" />
 
                     <!-- Command palette overlay -->
                     <controls:CommandPalette Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
