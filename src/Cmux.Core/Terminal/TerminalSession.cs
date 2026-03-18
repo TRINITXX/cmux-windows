@@ -317,6 +317,7 @@ public sealed class TerminalSession : IDisposable
             }
         }
 
+        RawOutputReceived?.Invoke(data);
         OutputReceived?.Invoke();
         Redraw?.Invoke();
     }

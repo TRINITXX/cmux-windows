@@ -52,21 +52,39 @@ public class ClaudeCodeStatusService : IDisposable
 
         // Check if any claude process exists globally (works in daemon mode)
         bool claudeRunningGlobally = false;
+        int claudeProcessCount = 0;
         try
         {
             var processes = System.Diagnostics.Process.GetProcessesByName("claude");
-            claudeRunningGlobally = processes.Length > 0;
+            claudeProcessCount = processes.Length;
+            claudeRunningGlobally = claudeProcessCount > 0;
             foreach (var p in processes) p.Dispose();
+
+            // Also check "claude-code" and "node" with claude in command line
+            if (!claudeRunningGlobally)
+            {
+                var nodeProcesses = System.Diagnostics.Process.GetProcessesByName("node");
+                claudeProcessCount = nodeProcesses.Length;
+                // If node processes exist, claude code might be running as a node process
+                claudeRunningGlobally = nodeProcesses.Length > 0;
+                foreach (var p in nodeProcesses) p.Dispose();
+            }
         }
         catch { }
 
         var now = DateTime.UtcNow;
+        var paneCount = _paneStates.Count;
+        Log($"Poll: claudeGlobal={claudeRunningGlobally} (count={claudeProcessCount}), panes={paneCount}");
+
         foreach (var (paneId, state) in _paneStates)
         {
             var outputAge = (now - state.LastOutputTime).TotalSeconds;
             var notifAge = state.NotificationTime.HasValue
                 ? (now - state.NotificationTime.Value).TotalSeconds
                 : double.MaxValue;
+            var sessionPid = state.Session.ProcessId;
+
+            Log($"  Pane {paneId[..8]}: outputAge={outputAge:F1}s notifAge={notifAge:F1}s pid={sessionPid} status={state.Status}");
 
             // Detect if this pane has Claude Code running based on output activity
             var hasRecentActivity = outputAge < 30; // Had output in last 30s = likely has claude
@@ -108,6 +126,14 @@ public class ClaudeCodeStatusService : IDisposable
         _disposed = true;
         _pollTimer.Stop();
         _pollTimer.Dispose();
+    }
+
+    private static readonly string _logPath = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "cmux", "claude-status-debug.log");
+    private static void Log(string msg)
+    {
+        try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { }
     }
 
     private class PaneState
