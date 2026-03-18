@@ -812,9 +812,9 @@ public partial class MainWindow : Window
     {
         if (ViewModel.SidebarVisible)
         {
-            var width = Math.Clamp(ViewModel.SidebarWidth, 200, 500);
+            var width = Math.Clamp(ViewModel.SidebarWidth, 120, 500);
             SidebarColumn.Width = new GridLength(width);
-            SidebarColumn.MinWidth = 200;
+            SidebarColumn.MinWidth = 120;
             SidebarColumn.MaxWidth = 500;
             SidebarBorder.Visibility = Visibility.Visible;
             SidebarSplitter.Visibility = Visibility.Visible;
