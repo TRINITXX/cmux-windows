@@ -120,7 +120,18 @@ public class TerminalControl : FrameworkElement
 
     public TerminalControl()
     {
-        _theme = GhosttyConfigReader.ReadConfig();
+        var settings = SettingsService.Current;
+        var effectiveTheme = TerminalThemes.GetEffective(settings);
+        _theme = new GhosttyTheme
+        {
+            Background = effectiveTheme.Background,
+            Foreground = effectiveTheme.Foreground,
+            Palette = effectiveTheme.Palette,
+            SelectionBackground = effectiveTheme.SelectionBg,
+            CursorColor = effectiveTheme.CursorColor,
+            FontFamily = settings.FontFamily,
+            FontSize = settings.FontSize
+        };
         _visual = new DrawingVisual();
         AddVisualChild(_visual);
         AddLogicalChild(_visual);
@@ -128,8 +139,6 @@ public class TerminalControl : FrameworkElement
         _fontSize = _theme.FontSize;
         // Font family with fallbacks for Unicode block/braille characters (QR codes, box drawing)
         _typeface = new Typeface(new FontFamily($"{_theme.FontFamily}, Segoe UI Symbol, Segoe UI Emoji, Arial Unicode MS"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-
-        var settings = SettingsService.Current;
         _cursorStyle = settings.CursorStyle;
         _cursorBlink = settings.CursorBlink;
 
