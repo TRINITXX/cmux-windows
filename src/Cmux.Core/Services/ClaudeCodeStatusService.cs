@@ -15,7 +15,7 @@ public class ClaudeCodeStatusService : IDisposable
     public ClaudeCodeStatusService()
     {
         _pollTimer = new System.Timers.Timer(2000);
-        _pollTimer.Elapsed += (_, _) => PollProcesses();
+        _pollTimer.Elapsed += (_, _) => PollStatus();
         _pollTimer.Start();
     }
 
@@ -27,6 +27,7 @@ public class ClaudeCodeStatusService : IDisposable
         session.RawOutputReceived += _ =>
         {
             state.LastOutputTime = DateTime.UtcNow;
+            // If we were waiting for input and output resumes, Claude is working again
             if (state.Status == ClaudeStatus.WaitingForInput)
                 TransitionTo(paneId, state, ClaudeStatus.Working);
         };
@@ -45,65 +46,49 @@ public class ClaudeCodeStatusService : IDisposable
         return _paneStates.TryGetValue(paneId, out var state) ? state.Status : ClaudeStatus.Idle;
     }
 
-    private void PollProcesses()
+    private void PollStatus()
     {
         if (_disposed) return;
 
-        var pids = new Dictionary<string, int>();
-        foreach (var (paneId, state) in _paneStates)
-        {
-            var pid = state.Session.ProcessId;
-            if (pid.HasValue) pids[paneId] = pid.Value;
-        }
-
-        if (pids.Count == 0) return;
-
-        // Batched WMI query for all shell PIDs
-        var parentPidList = string.Join(",", pids.Values.Distinct());
-        var childNames = new Dictionary<int, List<string>>();
-
+        // Check if any claude process exists globally (works in daemon mode)
+        bool claudeRunningGlobally = false;
         try
         {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                $"SELECT Name, ParentProcessId FROM Win32_Process WHERE ParentProcessId IN ({parentPidList})");
-            foreach (var obj in searcher.Get())
-            {
-                var parentPid = Convert.ToInt32(obj["ParentProcessId"]);
-                var name = obj["Name"]?.ToString() ?? "";
-                if (!childNames.ContainsKey(parentPid))
-                    childNames[parentPid] = [];
-                childNames[parentPid].Add(name);
-            }
+            var processes = System.Diagnostics.Process.GetProcessesByName("claude");
+            claudeRunningGlobally = processes.Length > 0;
+            foreach (var p in processes) p.Dispose();
         }
-        catch { return; }
+        catch { }
 
         var now = DateTime.UtcNow;
-        foreach (var (paneId, shellPid) in pids)
+        foreach (var (paneId, state) in _paneStates)
         {
-            if (!_paneStates.TryGetValue(paneId, out var state)) continue;
-
-            var children = childNames.GetValueOrDefault(shellPid, []);
-            var hasClaude = children.Any(n => n.Contains("claude", StringComparison.OrdinalIgnoreCase));
-
-            if (!hasClaude)
-            {
-                TransitionTo(paneId, state, ClaudeStatus.Idle);
-                continue;
-            }
-
             var outputAge = (now - state.LastOutputTime).TotalSeconds;
             var notifAge = state.NotificationTime.HasValue
                 ? (now - state.NotificationTime.Value).TotalSeconds
                 : double.MaxValue;
 
-            if (notifAge < 30 && outputAge > 2)
+            // Detect if this pane has Claude Code running based on output activity
+            var hasRecentActivity = outputAge < 30; // Had output in last 30s = likely has claude
+
+            if (!claudeRunningGlobally || !hasRecentActivity)
             {
+                TransitionTo(paneId, state, ClaudeStatus.Idle);
+                continue;
+            }
+
+            // Claude is running and this pane has recent activity
+            if (notifAge < 60 && outputAge > 2)
+            {
+                // Got a notification/BEL and output stopped = waiting for input
                 TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
             }
             else if (outputAge < 3)
             {
+                // Output flowing = working
                 TransitionTo(paneId, state, ClaudeStatus.Working);
             }
+            // else: keep current state to avoid flicker
         }
     }
 
