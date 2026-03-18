@@ -246,7 +246,7 @@ public partial class MainWindow : Window
         SidebarSplitter.DragCompleted += (_, _) =>
         {
             ViewModel.SidebarWidth = (int)SidebarColumn.ActualWidth;
-            SurfaceTabBarControl.Margin = new Thickness(Math.Max(0, SidebarColumn.ActualWidth - 38), 0, 0, 0);
+            SurfaceTabBarControl.Margin = new Thickness(Math.Max(0, SidebarColumn.ActualWidth - 33), 0, 0, 0);
         };
 
         // Auto-open browser when dev server starts
@@ -927,7 +927,7 @@ public partial class MainWindow : Window
             SidebarSplitter.Visibility = Visibility.Visible;
             // Align tabs with terminal content (after sidebar + splitter)
             // Subtract hamburger button width (38px) since tabs start after it
-            SurfaceTabBarControl.Margin = new Thickness(Math.Max(0, width - 38), 0, 0, 0);
+            SurfaceTabBarControl.Margin = new Thickness(Math.Max(0, width - 33), 0, 0, 0);
         }
         else
         {
