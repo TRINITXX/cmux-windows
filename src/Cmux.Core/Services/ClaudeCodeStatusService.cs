@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using Cmux.Core.Models;
 using Cmux.Core.Terminal;
 
@@ -14,7 +15,6 @@ public class ClaudeCodeStatusService : IDisposable
 
     public ClaudeCodeStatusService()
     {
-        Log("=== ClaudeCodeStatusService STARTED ===");
         _pollTimer = new System.Timers.Timer(2000);
         _pollTimer.Elapsed += (_, _) => PollStatus();
         _pollTimer.Start();
@@ -25,16 +25,31 @@ public class ClaudeCodeStatusService : IDisposable
         var state = new PaneState { Session = session };
         _paneStates[paneId] = state;
 
-        session.RawOutputReceived += _ =>
+        session.RawOutputReceived += data =>
         {
             state.LastOutputTime = DateTime.UtcNow;
-            // If we were waiting for input and output resumes, Claude is working again
-            if (state.Status == ClaudeStatus.WaitingForInput)
+
+            // Detect Claude Code by scanning output for its banner
+            if (!state.HasClaudeCode)
+            {
+                var text = Encoding.UTF8.GetString(data);
+                if (text.Contains("Claude Code", StringComparison.OrdinalIgnoreCase) ||
+                    text.Contains("claude-code", StringComparison.OrdinalIgnoreCase) ||
+                    text.Contains("/remote-control", StringComparison.OrdinalIgnoreCase))
+                {
+                    state.HasClaudeCode = true;
+                }
+            }
+
+            if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput)
                 TransitionTo(paneId, state, ClaudeStatus.Working);
         };
 
-        session.BellReceived += () => state.NotificationTime = DateTime.UtcNow;
-        session.NotificationReceived += (_, _, _) => state.NotificationTime = DateTime.UtcNow;
+        session.ProcessExited += () =>
+        {
+            state.HasClaudeCode = false;
+            TransitionTo(paneId, state, ClaudeStatus.Idle);
+        };
     }
 
     public void UnregisterPane(string paneId)
@@ -51,63 +66,33 @@ public class ClaudeCodeStatusService : IDisposable
     {
         if (_disposed) return;
 
-        // Check if any claude process exists globally (works in daemon mode)
-        bool claudeRunningGlobally = false;
-        int claudeProcessCount = 0;
-        try
-        {
-            var processes = System.Diagnostics.Process.GetProcessesByName("claude");
-            claudeProcessCount = processes.Length;
-            claudeRunningGlobally = claudeProcessCount > 0;
-            foreach (var p in processes) p.Dispose();
-
-            // Also check "claude-code" and "node" with claude in command line
-            if (!claudeRunningGlobally)
-            {
-                var nodeProcesses = System.Diagnostics.Process.GetProcessesByName("node");
-                claudeProcessCount = nodeProcesses.Length;
-                // If node processes exist, claude code might be running as a node process
-                claudeRunningGlobally = nodeProcesses.Length > 0;
-                foreach (var p in nodeProcesses) p.Dispose();
-            }
-        }
-        catch { }
-
         var now = DateTime.UtcNow;
-        var paneCount = _paneStates.Count;
-        Log($"Poll: claudeGlobal={claudeRunningGlobally} (count={claudeProcessCount}), panes={paneCount}");
-
         foreach (var (paneId, state) in _paneStates)
         {
-            var outputAge = (now - state.LastOutputTime).TotalSeconds;
-            var notifAge = state.NotificationTime.HasValue
-                ? (now - state.NotificationTime.Value).TotalSeconds
-                : double.MaxValue;
-            var sessionPid = state.Session.ProcessId;
-
-            Log($"  Pane {paneId[..8]}: outputAge={outputAge:F1}s notifAge={notifAge:F1}s pid={sessionPid} status={state.Status}");
-
-            // Detect if this pane has Claude Code running based on output activity
-            var hasRecentActivity = outputAge < 30; // Had output in last 30s = likely has claude
-
-            if (!claudeRunningGlobally || !hasRecentActivity)
+            // Only track panes where Claude Code was detected
+            if (!state.HasClaudeCode)
             {
-                TransitionTo(paneId, state, ClaudeStatus.Idle);
+                if (state.Status != ClaudeStatus.Idle)
+                    TransitionTo(paneId, state, ClaudeStatus.Idle);
                 continue;
             }
 
-            // Claude is running and this pane has recent activity
+            var outputAge = (now - state.LastOutputTime).TotalSeconds;
+
             if (outputAge < 3)
             {
-                // Output flowing right now = working
                 TransitionTo(paneId, state, ClaudeStatus.Working);
             }
-            else if (outputAge > 5 && outputAge < 30)
+            else if (outputAge > 5 && outputAge < 120)
             {
-                // No output for 5+ seconds but had recent activity = waiting for input
                 TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
             }
-            // else: keep current state to avoid flicker
+            else if (outputAge >= 120)
+            {
+                // No output for 2+ minutes — Claude probably exited
+                state.HasClaudeCode = false;
+                TransitionTo(paneId, state, ClaudeStatus.Idle);
+            }
         }
     }
 
@@ -116,8 +101,6 @@ public class ClaudeCodeStatusService : IDisposable
         var old = state.Status;
         if (old == newStatus) return;
         state.Status = newStatus;
-        if (newStatus != ClaudeStatus.WaitingForInput)
-            state.NotificationTime = null;
         StatusChanged?.Invoke(paneId, old, newStatus);
     }
 
@@ -129,19 +112,12 @@ public class ClaudeCodeStatusService : IDisposable
         _pollTimer.Dispose();
     }
 
-    private static readonly string _logPath = System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "cmux", "claude-status-debug.log");
-    private static void Log(string msg)
-    {
-        try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n"); } catch { }
-    }
-
     private class PaneState
     {
         public TerminalSession Session { get; init; } = null!;
         public ClaudeStatus Status { get; set; } = ClaudeStatus.Idle;
         public DateTime LastOutputTime { get; set; } = DateTime.MinValue;
         public DateTime? NotificationTime { get; set; }
+        public bool HasClaudeCode { get; set; }
     }
 }
