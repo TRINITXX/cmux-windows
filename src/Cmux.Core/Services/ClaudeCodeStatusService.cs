@@ -5,17 +5,28 @@ using Cmux.Core.Terminal;
 
 namespace Cmux.Core.Services;
 
+/// <summary>
+/// Detects Claude Code status per workspace by reading hook-written status files.
+/// Files are at %LOCALAPPDATA%/cmux/claude-status/{folderName}.txt
+/// containing "working" or "waiting".
+/// Also detects Claude Code presence by scanning terminal output for the banner.
+/// </summary>
 public class ClaudeCodeStatusService : IDisposable
 {
+    private static readonly string StatusDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "cmux", "claude-status");
+
     private readonly ConcurrentDictionary<string, PaneState> _paneStates = new();
     private readonly System.Timers.Timer _pollTimer;
     private bool _disposed;
 
     public event Action<string, ClaudeStatus, ClaudeStatus>? StatusChanged;
-    public event Action<string>? ClaudeCodeDetected; // paneId
+    public event Action<string>? ClaudeCodeDetected;
 
     public ClaudeCodeStatusService()
     {
+        Directory.CreateDirectory(StatusDir);
         _pollTimer = new System.Timers.Timer(2000);
         _pollTimer.Elapsed += (_, _) => PollStatus();
         _pollTimer.Start();
@@ -33,40 +44,12 @@ public class ClaudeCodeStatusService : IDisposable
             {
                 var text = Encoding.UTF8.GetString(data);
                 if (text.Contains("Claude Code", StringComparison.OrdinalIgnoreCase) ||
-                    text.Contains("claude-code", StringComparison.OrdinalIgnoreCase) ||
                     text.Contains("/remote-control", StringComparison.OrdinalIgnoreCase))
                 {
                     state.HasClaudeCode = true;
                     ClaudeCodeDetected?.Invoke(paneId);
                 }
             }
-
-            // Track output volume to distinguish Claude working (sustained heavy output)
-            // from TUI redraws (status line, cursor blink = small periodic chunks)
-            // Claude generating text: many chunks > 200 bytes rapidly
-            // Claude idle TUI redraw: occasional chunks 50-200 bytes
-            if (data.Length > 200)
-            {
-                var now = DateTime.UtcNow;
-                state.RecentBigChunks.Enqueue(now);
-                while (state.RecentBigChunks.Count > 0 &&
-                       (now - state.RecentBigChunks.Peek()).TotalSeconds > 5)
-                    state.RecentBigChunks.Dequeue();
-
-                // Need 5+ big chunks in 5s to count as "working"
-                if (state.RecentBigChunks.Count >= 5)
-                    state.LastSustainedOutputTime = now;
-            }
-
-            if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput &&
-                state.RecentBigChunks.Count >= 5)
-                TransitionTo(paneId, state, ClaudeStatus.Working);
-        };
-
-        session.ProcessExited += () =>
-        {
-            state.HasClaudeCode = false;
-            TransitionTo(paneId, state, ClaudeStatus.Idle);
         };
     }
 
@@ -84,10 +67,24 @@ public class ClaudeCodeStatusService : IDisposable
     {
         if (_disposed) return;
 
-        var now = DateTime.UtcNow;
+        // Read all status files once
+        var statusByFolder = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            if (Directory.Exists(StatusDir))
+            {
+                foreach (var file in Directory.GetFiles(StatusDir, "*.txt"))
+                {
+                    var folderName = Path.GetFileNameWithoutExtension(file);
+                    var content = File.ReadAllText(file).Trim().ToLowerInvariant();
+                    statusByFolder[folderName] = content;
+                }
+            }
+        }
+        catch { }
+
         foreach (var (paneId, state) in _paneStates)
         {
-            // Only track panes where Claude Code was detected
             if (!state.HasClaudeCode)
             {
                 if (state.Status != ClaudeStatus.Idle)
@@ -95,23 +92,25 @@ public class ClaudeCodeStatusService : IDisposable
                 continue;
             }
 
-            var bigOutputAge = (now - state.LastSustainedOutputTime).TotalSeconds;
+            // Match pane to status file by workspace folder name
+            var cwd = state.Session.WorkingDirectory;
+            if (string.IsNullOrEmpty(cwd))
+            {
+                continue;
+            }
 
-            if (bigOutputAge < 3)
+            var folderName = Path.GetFileName(cwd.TrimEnd('/', '\\'));
+            if (string.IsNullOrEmpty(folderName)) continue;
+
+            if (statusByFolder.TryGetValue(folderName, out var hookStatus))
             {
-                // Sustained output in the last 3s = Claude is generating
-                TransitionTo(paneId, state, ClaudeStatus.Working);
-            }
-            else if (bigOutputAge >= 3 && bigOutputAge < 120)
-            {
-                // No substantial output for 5+ seconds = waiting for input
-                TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
-            }
-            else if (bigOutputAge >= 120)
-            {
-                // No output for 2+ minutes — Claude probably exited
-                state.HasClaudeCode = false;
-                TransitionTo(paneId, state, ClaudeStatus.Idle);
+                var newStatus = hookStatus switch
+                {
+                    "working" => ClaudeStatus.Working,
+                    "waiting" => ClaudeStatus.WaitingForInput,
+                    _ => ClaudeStatus.Idle
+                };
+                TransitionTo(paneId, state, newStatus);
             }
         }
     }
@@ -136,9 +135,6 @@ public class ClaudeCodeStatusService : IDisposable
     {
         public TerminalSession Session { get; init; } = null!;
         public ClaudeStatus Status { get; set; } = ClaudeStatus.Idle;
-        public DateTime LastOutputTime { get; set; } = DateTime.MinValue;
-        public DateTime LastSustainedOutputTime { get; set; } = DateTime.MinValue;
-        public Queue<DateTime> RecentBigChunks { get; } = new();
         public bool HasClaudeCode { get; set; }
     }
 }

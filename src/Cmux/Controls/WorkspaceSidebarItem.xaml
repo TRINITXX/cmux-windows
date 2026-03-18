@@ -169,8 +169,9 @@
                        FontSize="11" TextTrimming="CharacterEllipsis" />
         </StackPanel>
 
-        <!-- Working directory (show end of path) -->
+        <!-- Working directory (show last 2 segments) -->
         <TextBlock x:Name="WorkingDirInfo" Grid.Row="3"
+                   Text="{Binding WorkingDirectory}"
                    Foreground="{StaticResource ForegroundDimBrush}"
                    FontSize="10" Margin="0,2,0,0"
                    TextTrimming="CharacterEllipsis"

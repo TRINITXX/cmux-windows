@@ -93,6 +93,39 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             if (firstLeaf?.PaneId != null)
                 FocusedPaneId = firstLeaf.PaneId;
         }
+
+        // Auto-relaunch Claude Code in panes that had it before restart
+        RelaunchClaudeCodePanes();
+    }
+
+    private void RelaunchClaudeCodePanes()
+    {
+        var claudePanes = new List<string>();
+        foreach (var leaf in RootNode.GetLeaves())
+        {
+            if (leaf.PaneId != null &&
+                Surface.PaneCustomNames.TryGetValue(leaf.PaneId, out var name) &&
+                name == "Claude Code")
+            {
+                claudePanes.Add(leaf.PaneId);
+            }
+        }
+
+        if (claudePanes.Count == 0) return;
+
+        _ = Task.Run(async () =>
+        {
+            // Wait for sessions to initialize
+            await Task.Delay(2000);
+            foreach (var paneId in claudePanes)
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    SendCommandToPane(paneId, "claude --dangerously-skip-permissions --effort max");
+                });
+                await Task.Delay(500);
+            }
+        });
     }
 
     private void OnDaemonRawOutput(string paneId, byte[] data)
