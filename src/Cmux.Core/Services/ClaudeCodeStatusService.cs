@@ -27,8 +27,6 @@ public class ClaudeCodeStatusService : IDisposable
 
         session.RawOutputReceived += data =>
         {
-            state.LastOutputTime = DateTime.UtcNow;
-
             // Detect Claude Code by scanning output for its banner
             if (!state.HasClaudeCode)
             {
@@ -41,7 +39,15 @@ public class ClaudeCodeStatusService : IDisposable
                 }
             }
 
-            if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput)
+            // Only count substantial output as "working" (ignore cursor moves, redraws)
+            // Small bursts (<50 bytes) are usually terminal UI updates, not Claude generating
+            if (data.Length > 50)
+            {
+                state.LastBigOutputTime = DateTime.UtcNow;
+                state.BigOutputCount++;
+            }
+
+            if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput && data.Length > 50)
                 TransitionTo(paneId, state, ClaudeStatus.Working);
         };
 
@@ -77,17 +83,19 @@ public class ClaudeCodeStatusService : IDisposable
                 continue;
             }
 
-            var outputAge = (now - state.LastOutputTime).TotalSeconds;
+            var bigOutputAge = (now - state.LastBigOutputTime).TotalSeconds;
 
-            if (outputAge < 3)
+            if (bigOutputAge < 5)
             {
+                // Substantial output in the last 5s = Claude is generating
                 TransitionTo(paneId, state, ClaudeStatus.Working);
             }
-            else if (outputAge > 5 && outputAge < 120)
+            else if (bigOutputAge >= 5 && bigOutputAge < 120)
             {
+                // No substantial output for 5+ seconds = waiting for input
                 TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
             }
-            else if (outputAge >= 120)
+            else if (bigOutputAge >= 120)
             {
                 // No output for 2+ minutes — Claude probably exited
                 state.HasClaudeCode = false;
@@ -117,7 +125,8 @@ public class ClaudeCodeStatusService : IDisposable
         public TerminalSession Session { get; init; } = null!;
         public ClaudeStatus Status { get; set; } = ClaudeStatus.Idle;
         public DateTime LastOutputTime { get; set; } = DateTime.MinValue;
-        public DateTime? NotificationTime { get; set; }
+        public DateTime LastBigOutputTime { get; set; } = DateTime.MinValue;
+        public long BigOutputCount { get; set; }
         public bool HasClaudeCode { get; set; }
     }
 }
