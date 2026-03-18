@@ -169,16 +169,18 @@ public class VtParser
         {
             // DEL — ignore in ground
         }
-        else if (b >= 0xC0 && b <= 0xF7)
-        {
-            // Start of multi-byte UTF-8 (may arrive here after CSI sequence)
-            if (b < 0xE0) { _utf8Remaining = 1; _utf8Codepoint = b & 0x1F; }
-            else if (b < 0xF0) { _utf8Remaining = 2; _utf8Codepoint = b & 0x0F; }
-            else { _utf8Remaining = 3; _utf8Codepoint = b & 0x07; }
-        }
         else if (b >= 0x80)
         {
-            // Stray continuation byte — ignore
+            // Any byte >= 0x80 in Ground state should be handled as UTF-8
+            // Lead bytes: 0xC0-0xF7 start a multi-byte sequence
+            // Continuation bytes: 0x80-0xBF are stray (no active sequence)
+            if (b >= 0xC0 && b <= 0xF7)
+            {
+                if (b < 0xE0) { _utf8Remaining = 1; _utf8Codepoint = b & 0x1F; }
+                else if (b < 0xF0) { _utf8Remaining = 2; _utf8Codepoint = b & 0x0F; }
+                else { _utf8Remaining = 3; _utf8Codepoint = b & 0x07; }
+            }
+            // else: stray continuation byte, ignore
         }
         else
         {
