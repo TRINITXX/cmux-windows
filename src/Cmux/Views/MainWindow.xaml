@@ -135,7 +135,8 @@
         </Border.Clip>
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" /> <!-- Title bar -->
+                <RowDefinition Height="Auto" /> <!-- Menu bar (hidden by default) -->
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -144,57 +145,32 @@
                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
                 <Grid Height="38">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" /> <!-- Menu items -->
+                        <ColumnDefinition Width="Auto" /> <!-- Hamburger button -->
+                        <ColumnDefinition Width="Auto" /> <!-- Surface tabs -->
                         <ColumnDefinition Width="*" />    <!-- Drag area -->
                         <ColumnDefinition Width="Auto" /> <!-- Window buttons -->
                     </Grid.ColumnDefinitions>
 
-                    <!-- Menu items (left side) -->
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
-                                WindowChrome.IsHitTestVisibleInChrome="True">
-                        <TextBlock Text="cmuxw" FontSize="13" FontWeight="SemiBold"
-                                   Foreground="{StaticResource AccentBrush}"
-                                   VerticalAlignment="Center" Margin="14,0,12,0" />
-                        <Menu Style="{StaticResource AppMenuStyle}" VerticalAlignment="Center">
-                            <Menu.Resources>
-                                <Style TargetType="Separator" BasedOn="{StaticResource AppMenuSeparatorStyle}" />
-                            </Menu.Resources>
-                            <MenuItem Header="_File" Style="{StaticResource AppMenuTopItemStyle}" ItemContainerStyle="{StaticResource AppMenuSubItemStyle}">
-                                <MenuItem Header="_New Workspace" Command="{Binding CreateNewWorkspaceCommand}" InputGestureText="Ctrl+N" />
-                                <MenuItem Header="New _Surface" Command="{Binding SelectedWorkspace.CreateNewSurfaceCommand}" InputGestureText="Ctrl+T" />
-                                <Separator />
-                                <MenuItem Header="Open Command _Logs" Click="MenuOpenLogs_Click" InputGestureText="Ctrl+Shift+L" />
-                                <MenuItem Header="Open Session _Vault" Click="MenuOpenSessionVault_Click" InputGestureText="Ctrl+Shift+V" />
-                                <Separator />
-                                <MenuItem Header="_Settings" Click="MenuOpenSettings_Click" InputGestureText="Ctrl+," />
-                                <Separator />
-                                <MenuItem Header="E_xit" Click="CloseButton_Click" />
-                            </MenuItem>
-                            <MenuItem Header="_Window" Style="{StaticResource AppMenuTopItemStyle}" ItemContainerStyle="{StaticResource AppMenuSubItemStyle}">
-                                <MenuItem Header="Split _Right" Click="ToolbarSplitRight_Click" InputGestureText="Ctrl+D" />
-                                <MenuItem Header="Split _Down" Click="ToolbarSplitDown_Click" InputGestureText="Ctrl+Shift+D" />
-                                <MenuItem Header="_Zoom Pane" Click="ToolbarZoom_Click" InputGestureText="Ctrl+Shift+Z" />
-                                <MenuItem Header="_Equalize Panes" Click="ToolbarEqualize_Click" />
-                                <Separator />
-                                <MenuItem Header="_Search" Click="Search_Click" InputGestureText="Ctrl+Shift+F" />
-                                <MenuItem Header="Command _Palette" Click="CommandPalette_Click" InputGestureText="Ctrl+Shift+P" />
-                                <MenuItem Header="_Snippets" Click="Snippets_Click" />
-                                <Separator />
-                                <MenuItem Header="Toggle _Sidebar" Command="{Binding ToggleSidebarCommand}" InputGestureText="Ctrl+B" />
-                            </MenuItem>
-                            <MenuItem Header="_Help" Style="{StaticResource AppMenuTopItemStyle}" ItemContainerStyle="{StaticResource AppMenuSubItemStyle}">
-                                <MenuItem Header="Keyboard Shortcuts" Click="MenuOpenKeyboardShortcuts_Click" />
-                                <MenuItem Header="About" Click="MenuAbout_Click" />
-                            </MenuItem>
-                        </Menu>
-                    </StackPanel>
+                    <!-- Hamburger menu button -->
+                    <Button Grid.Column="0" Style="{StaticResource IconButton}"
+                            Click="ToggleMenuBar_Click"
+                            WindowChrome.IsHitTestVisibleInChrome="True"
+                            Width="38" Height="38" ToolTip="Toggle Menu (Alt)">
+                        <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="14" />
+                    </Button>
+
+                    <!-- Surface tabs (moved from content area) -->
+                    <controls:SurfaceTabBar x:Name="SurfaceTabBarControl" Grid.Column="1"
+                        DataContext="{Binding SelectedWorkspace}"
+                        WindowChrome.IsHitTestVisibleInChrome="True"
+                        Height="34" VerticalAlignment="Center" />
 
                     <!-- Drag area (center) -->
-                    <Border Grid.Column="1" Background="Transparent"
+                    <Border Grid.Column="2" Background="Transparent"
                             MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" />
 
                     <!-- Window control buttons (right side) -->
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top"
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Top"
                                 WindowChrome.IsHitTestVisibleInChrome="True">
                         <Button Style="{StaticResource WindowChromeButton}" Click="MinimizeButton_Click"
                                 ToolTip="Minimize">
@@ -212,8 +188,48 @@
                 </Grid>
             </Border>
 
+            <!-- Menu bar (hidden by default, toggled by hamburger) -->
+            <StackPanel x:Name="MenuBarPanel" Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Center"
+                        Background="{StaticResource SidebarBackgroundBrush}" Visibility="Collapsed">
+                <TextBlock Text="cmuxw" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{StaticResource AccentBrush}"
+                           VerticalAlignment="Center" Margin="14,0,12,0" />
+                <Menu Style="{StaticResource AppMenuStyle}" VerticalAlignment="Center">
+                    <Menu.Resources>
+                        <Style TargetType="Separator" BasedOn="{StaticResource AppMenuSeparatorStyle}" />
+                    </Menu.Resources>
+                    <MenuItem Header="_File" Style="{StaticResource AppMenuTopItemStyle}" ItemContainerStyle="{StaticResource AppMenuSubItemStyle}">
+                        <MenuItem Header="_New Workspace" Command="{Binding CreateNewWorkspaceCommand}" InputGestureText="Ctrl+N" />
+                        <MenuItem Header="New _Surface" Command="{Binding SelectedWorkspace.CreateNewSurfaceCommand}" InputGestureText="Ctrl+T" />
+                        <Separator />
+                        <MenuItem Header="Open Command _Logs" Click="MenuOpenLogs_Click" InputGestureText="Ctrl+Shift+L" />
+                        <MenuItem Header="Open Session _Vault" Click="MenuOpenSessionVault_Click" InputGestureText="Ctrl+Shift+V" />
+                        <Separator />
+                        <MenuItem Header="_Settings" Click="MenuOpenSettings_Click" InputGestureText="Ctrl+," />
+                        <Separator />
+                        <MenuItem Header="E_xit" Click="CloseButton_Click" />
+                    </MenuItem>
+                    <MenuItem Header="_Window" Style="{StaticResource AppMenuTopItemStyle}" ItemContainerStyle="{StaticResource AppMenuSubItemStyle}">
+                        <MenuItem Header="Split _Right" Click="ToolbarSplitRight_Click" InputGestureText="Ctrl+D" />
+                        <MenuItem Header="Split _Down" Click="ToolbarSplitDown_Click" InputGestureText="Ctrl+Shift+D" />
+                        <MenuItem Header="_Zoom Pane" Click="ToolbarZoom_Click" InputGestureText="Ctrl+Shift+Z" />
+                        <MenuItem Header="_Equalize Panes" Click="ToolbarEqualize_Click" />
+                        <Separator />
+                        <MenuItem Header="_Search" Click="Search_Click" InputGestureText="Ctrl+Shift+F" />
+                        <MenuItem Header="Command _Palette" Click="CommandPalette_Click" InputGestureText="Ctrl+Shift+P" />
+                        <MenuItem Header="_Snippets" Click="Snippets_Click" />
+                        <Separator />
+                        <MenuItem Header="Toggle _Sidebar" Command="{Binding ToggleSidebarCommand}" InputGestureText="Ctrl+B" />
+                    </MenuItem>
+                    <MenuItem Header="_Help" Style="{StaticResource AppMenuTopItemStyle}" ItemContainerStyle="{StaticResource AppMenuSubItemStyle}">
+                        <MenuItem Header="Keyboard Shortcuts" Click="MenuOpenKeyboardShortcuts_Click" />
+                        <MenuItem Header="About" Click="MenuAbout_Click" />
+                    </MenuItem>
+                </Menu>
+            </StackPanel>
+
             <!-- Main content -->
-            <Grid Grid.Row="1">
+            <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition x:Name="SidebarColumn" Width="280" />
                     <ColumnDefinition Width="Auto" />
@@ -422,7 +438,6 @@
                 <!-- Content area -->
                 <Grid Grid.Column="2">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" /> <!-- Surface tabs -->
                         <RowDefinition Height="Auto" /> <!-- Toolbar -->
                         <RowDefinition Height="*" />    <!-- Terminal content -->
                         <RowDefinition Height="Auto" /> <!-- Status bar -->
@@ -431,12 +446,8 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- Surface tabs -->
-                    <controls:SurfaceTabBar x:Name="SurfaceTabBarControl" Grid.Row="0" Grid.Column="0"
-                        DataContext="{Binding SelectedWorkspace}" />
-
                     <!-- Toolbar -->
-                    <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}"
+                    <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
                             Padding="6,2">
                         <StackPanel Orientation="Horizontal">
@@ -510,29 +521,29 @@
                     </Border>
 
                     <!-- Terminal content -->
-                    <ContentControl Grid.Row="2" Grid.Column="0" x:Name="ContentArea">
+                    <ContentControl Grid.Row="1" Grid.Column="0" x:Name="ContentArea">
                         <controls:SplitPaneContainer x:Name="SplitPaneContainerControl"
                             DataContext="{Binding SelectedWorkspace.SelectedSurface}" />
                     </ContentControl>
 
                     <!-- Notification panel overlay -->
-                    <controls:NotificationPanel Grid.Row="0" Grid.RowSpan="3" Grid.Column="0"
+                    <controls:NotificationPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
                         HorizontalAlignment="Right"
                         Visibility="{Binding NotificationPanelVisible, Converter={StaticResource BoolToVisibility}}"
                         DataContext="{Binding}" />
 
                     <!-- Command palette overlay -->
-                    <controls:CommandPalette Grid.Row="0" Grid.RowSpan="3" Grid.Column="0"
+                    <controls:CommandPalette Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
                         x:Name="CommandPaletteControl"
                         Visibility="Collapsed" />
 
                     <!-- Snippet picker overlay -->
-                    <controls:SnippetPicker Grid.Row="0" Grid.RowSpan="3" Grid.Column="0"
+                    <controls:SnippetPicker Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
                         x:Name="SnippetPickerControl"
                         Visibility="Collapsed" />
 
                     <!-- Status bar -->
-                    <Border Grid.Row="3" Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}"
+                    <Border Grid.Row="2" Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
                             Padding="10,3">
                         <Grid>

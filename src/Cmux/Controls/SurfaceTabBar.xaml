@@ -2,12 +2,11 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Cmux.ViewModels"
-             Height="38" Background="{StaticResource SurfaceTabBackgroundBrush}">
+             Background="{StaticResource SurfaceTabBackgroundBrush}">
 
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
@@ -133,42 +132,6 @@
                 Click="AddTab_Click"
                 Width="28" Height="28" Padding="0" Margin="2,4,4,4" Opacity="0.6" VerticalAlignment="Center" />
         </StackPanel>
-
-        <!-- Inline search bar -->
-        <Border Grid.Column="1" CornerRadius="6" Margin="4"
-                Background="{StaticResource SurfaceHighBrush}" VerticalAlignment="Center"
-                Height="26" Width="220">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="&#xE721;" FontFamily="Segoe MDL2 Assets"
-                           FontSize="11" Foreground="{StaticResource ForegroundDimBrush}"
-                           VerticalAlignment="Center" Margin="6,0,4,0" />
-                <TextBox x:Name="SearchInput" Grid.Column="1"
-                         Background="Transparent" Foreground="{StaticResource ForegroundBrush}"
-                         CaretBrush="{StaticResource AccentBrush}"
-                         BorderThickness="0" FontSize="12" Padding="2,2"
-                         VerticalContentAlignment="Center"
-                         TextChanged="SearchInput_TextChanged"
-                         KeyDown="SearchInput_KeyDown" />
-                <TextBlock x:Name="MatchCount" Grid.Column="2" Text=""
-                           Foreground="{StaticResource ForegroundDimBrush}" FontSize="10"
-                           VerticalAlignment="Center" Margin="4,0" />
-                <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="0,0,2,0">
-                    <Button Content="&#xE010;" FontFamily="Segoe MDL2 Assets"
-                            FontSize="9" Style="{StaticResource IconButton}"
-                            Width="20" Height="20" Click="PrevMatch_Click" ToolTip="Previous (Shift+Enter)" />
-                    <Button Content="&#xE011;" FontFamily="Segoe MDL2 Assets"
-                            FontSize="9" Style="{StaticResource IconButton}"
-                            Width="20" Height="20" Click="NextMatch_Click" ToolTip="Next (Enter)" />
-                </StackPanel>
-            </Grid>
-        </Border>
-
 
         <!-- Inline rename overlay -->
         <TextBox x:Name="TabRenameBox" Visibility="Collapsed"

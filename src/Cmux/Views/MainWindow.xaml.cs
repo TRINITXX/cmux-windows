@@ -34,16 +34,7 @@ public partial class MainWindow : Window
         SnippetPickerControl.SnippetSelected += OnSnippetSelected;
         SnippetPickerControl.Closed += () => SnippetPickerControl.Visibility = Visibility.Collapsed;
 
-        // Wire inline search events from tab bar
-        SurfaceTabBarControl.SearchTextChanged += OnSearchTextChanged;
-        SurfaceTabBarControl.NextMatchRequested += OnSearchNext;
-        SurfaceTabBarControl.PreviousMatchRequested += OnSearchPrevious;
-
-        // Wire terminal surface events
-        SplitPaneContainerControl.SearchRequested += () =>
-        {
-            SurfaceTabBarControl.FocusSearch();
-        };
+        // Search bar removed from tab bar; search available via Ctrl+Shift+F command palette
 
         // Periodically refresh lightweight UI state (pane count, zoom icon)
         _uiRefreshTimer.Tick += (_, _) => RefreshSurfaceUiState();
@@ -540,6 +531,13 @@ public partial class MainWindow : Window
     }
 
     // Title bar handlers
+    private void ToggleMenuBar_Click(object sender, RoutedEventArgs e)
+    {
+        MenuBarPanel.Visibility = MenuBarPanel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount == 2)
