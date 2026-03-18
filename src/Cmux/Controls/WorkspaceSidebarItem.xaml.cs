@@ -15,8 +15,30 @@ public partial class WorkspaceSidebarItem : UserControl
     public WorkspaceSidebarItem()
     {
         InitializeComponent();
-        Loaded += (_, _) => App.ClaudeStatusService.StatusChanged += OnClaudeStatusChanged;
+        Loaded += (_, _) =>
+        {
+            App.ClaudeStatusService.StatusChanged += OnClaudeStatusChanged;
+            UpdateWorkingDirText();
+        };
         Unloaded += (_, _) => App.ClaudeStatusService.StatusChanged -= OnClaudeStatusChanged;
+        DataContextChanged += (_, _) =>
+        {
+            // Unsubscribe from old VM
+            if (_subscribedVm != null)
+                _subscribedVm.PropertyChanged -= OnVmPropertyChanged;
+
+            _subscribedVm = Vm;
+            if (_subscribedVm != null)
+                _subscribedVm.PropertyChanged += OnVmPropertyChanged;
+
+            UpdateWorkingDirText();
+        };
+    }
+
+    private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(WorkspaceViewModel.WorkingDirectory))
+            Dispatcher.BeginInvoke(UpdateWorkingDirText);
     }
 
     private void OnClaudeStatusChanged(string paneId, ClaudeStatus oldStatus, ClaudeStatus newStatus)
@@ -213,18 +235,7 @@ public partial class WorkspaceSidebarItem : UserControl
         return true;
     }
 
-    private void WorkingDirInfo_Loaded(object sender, RoutedEventArgs e)
-    {
-        UpdateWorkingDirText();
-
-        // Also update when workspace working directory changes
-        if (Vm != null)
-            Vm.PropertyChanged += (_, args) =>
-            {
-                if (args.PropertyName == nameof(WorkspaceViewModel.WorkingDirectory))
-                    Dispatcher.BeginInvoke(UpdateWorkingDirText);
-            };
-    }
+    private WorkspaceViewModel? _subscribedVm;
 
     private void UpdateWorkingDirText()
     {

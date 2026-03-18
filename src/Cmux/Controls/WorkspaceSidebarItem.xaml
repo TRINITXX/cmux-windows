@@ -174,8 +174,7 @@
                    Foreground="{StaticResource ForegroundDimBrush}"
                    FontSize="10" Margin="0,2,0,0"
                    TextTrimming="CharacterEllipsis"
-                   Visibility="{Binding WorkingDirectory, Converter={StaticResource NullToCollapsed}}"
-                   Loaded="WorkingDirInfo_Loaded" />
+                   Visibility="{Binding WorkingDirectory, Converter={StaticResource NullToCollapsed}}" />
 
         <!-- Latest notification text -->
         <TextBlock x:Name="LatestNotificationInfo" Grid.Row="4" Text="{Binding LatestNotificationText}"
