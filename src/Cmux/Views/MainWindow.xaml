@@ -10,7 +10,8 @@
         ResizeMode="CanResize"
         Background="Transparent"
         Loaded="OnLoaded" Closing="OnClosing"
-        KeyDown="OnKeyDown">
+        KeyDown="OnKeyDown"
+        PreviewKeyDown="OnPreviewKeyDown">
 
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="38" CornerRadius="0" GlassFrameThickness="0"

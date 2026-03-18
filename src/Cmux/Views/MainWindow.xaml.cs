@@ -363,21 +363,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        // F11: Zen mode — must use PreviewKeyDown to catch before terminal consumes it
+        if (e.Key == Key.F11 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            ToggleZenMode();
+            e.Handled = true;
+        }
+    }
+
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
         bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
         bool alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
-
-        // === App-level shortcuts that always work, even with terminal focus ===
-
-        // F11: Zen mode (hide sidebar, tab bar, toolbar)
-        if (e.Key == Key.F11 && !ctrl && !shift && !alt)
-        {
-            ToggleZenMode();
-            e.Handled = true;
-            return;
-        }
 
         // Ctrl+Tab / Ctrl+Shift+Tab: cycle surfaces
         if (ctrl && e.Key == Key.Tab)
