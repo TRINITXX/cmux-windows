@@ -215,11 +215,23 @@ public partial class WorkspaceSidebarItem : UserControl
 
     private void WorkingDirInfo_Loaded(object sender, RoutedEventArgs e)
     {
+        UpdateWorkingDirText();
+
+        // Also update when workspace working directory changes
+        if (Vm != null)
+            Vm.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(WorkspaceViewModel.WorkingDirectory))
+                    Dispatcher.BeginInvoke(UpdateWorkingDirText);
+            };
+    }
+
+    private void UpdateWorkingDirText()
+    {
         if (Vm == null || WorkingDirInfo == null) return;
         var fullPath = Vm.WorkingDirectory;
         if (string.IsNullOrEmpty(fullPath)) { WorkingDirInfo.Text = ""; return; }
 
-        // Show only last 2 segments: "Desktop\VTC-Planner"
         var parts = fullPath.TrimEnd('\\', '/').Split('\\', '/');
         WorkingDirInfo.Text = parts.Length >= 2
             ? parts[^2] + "\\" + parts[^1]
