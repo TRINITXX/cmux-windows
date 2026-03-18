@@ -22,9 +22,18 @@ public partial class App : Application
     public static DaemonClient DaemonClient { get; } = new();
     public static Task<bool> DaemonConnectTask { get; private set; } = Task.FromResult(false);
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool SetConsoleOutputCP(uint wCodePageID);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool SetConsoleCP(uint wCodePageID);
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Force UTF-8 code page for ConPTY (fixes QR codes, Unicode block chars)
+        SetConsoleOutputCP(65001);
+        SetConsoleCP(65001);
 
         // Add global exception handlers to diagnose crashes
         DispatcherUnhandledException += (s, args) =>

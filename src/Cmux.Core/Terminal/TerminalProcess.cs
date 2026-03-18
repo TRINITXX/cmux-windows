@@ -23,9 +23,9 @@ public sealed class TerminalProcess : IDisposable
     {
         var shellCommand = command ?? DetectShell();
 
-        // Wrap shell in cmd /c chcp to force UTF-8 code page before launching
-        if (command == null)
-            shellCommand = $"cmd.exe /c chcp 65001 >nul && {shellCommand}";
+        // Force UTF-8 code page for proper Unicode rendering
+        // Set via environment variable that pwsh/powershell reads at startup
+        // The actual chcp is done in the PowerShell profile
 
         // Build environment block
         var envBlock = BuildUtf8Environment();
