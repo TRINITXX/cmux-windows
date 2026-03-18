@@ -184,7 +184,12 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
     private void OnClaudeCodeDetected(string paneId)
     {
         if (_sessions.ContainsKey(paneId))
+        {
             SetPaneCustomName(paneId, "Claude Code");
+            // Also rename the surface tab if it still has the default name
+            if (Name.StartsWith("Terminal"))
+                Name = "Claude Code";
+        }
     }
 
     public void SwapPanes(string paneId1, string paneId2)
