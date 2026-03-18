@@ -41,24 +41,25 @@ public class ClaudeCodeStatusService : IDisposable
                 }
             }
 
-            // Track output frequency to distinguish Claude working (sustained output)
-            // from redraws (single burst on tab switch)
-            if (data.Length > 50)
+            // Track output volume to distinguish Claude working (sustained heavy output)
+            // from TUI redraws (status line, cursor blink = small periodic chunks)
+            // Claude generating text: many chunks > 200 bytes rapidly
+            // Claude idle TUI redraw: occasional chunks 50-200 bytes
+            if (data.Length > 200)
             {
                 var now = DateTime.UtcNow;
                 state.RecentBigChunks.Enqueue(now);
-                // Keep only chunks from last 5 seconds
                 while (state.RecentBigChunks.Count > 0 &&
                        (now - state.RecentBigChunks.Peek()).TotalSeconds > 5)
                     state.RecentBigChunks.Dequeue();
 
-                // Need 3+ big chunks in 5s to count as "working" (sustained output)
-                if (state.RecentBigChunks.Count >= 3)
+                // Need 5+ big chunks in 5s to count as "working"
+                if (state.RecentBigChunks.Count >= 5)
                     state.LastSustainedOutputTime = now;
             }
 
             if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput &&
-                state.RecentBigChunks.Count >= 3)
+                state.RecentBigChunks.Count >= 5)
                 TransitionTo(paneId, state, ClaudeStatus.Working);
         };
 
