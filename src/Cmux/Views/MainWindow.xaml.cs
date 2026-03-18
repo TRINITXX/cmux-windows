@@ -964,12 +964,14 @@ public partial class MainWindow : Window
             SidebarColumn.MaxWidth = 0;
             SurfaceTabBarControl.Visibility = Visibility.Collapsed;
             ToolbarBorder.Visibility = Visibility.Collapsed;
+            TitleBarBorder.Visibility = Visibility.Collapsed;
         }
         else
         {
             // Restore
             SurfaceTabBarControl.Visibility = Visibility.Visible;
             ToolbarBorder.Visibility = Visibility.Visible;
+            TitleBarBorder.Visibility = Visibility.Visible;
             UpdateSidebarLayout();
         }
     }
