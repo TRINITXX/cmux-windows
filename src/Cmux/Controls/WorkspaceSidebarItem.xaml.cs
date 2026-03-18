@@ -59,14 +59,16 @@ public partial class WorkspaceSidebarItem : UserControl
             {
                 case ClaudeStatus.Working:
                     AgentStatusDot.Fill = new SolidColorBrush(Colors.LimeGreen);
-                    AgentStatusDot.Visibility = Visibility.Visible;
+                    AgentStatusText.Text = "Claude working...";
+                    ClaudeStatusPanel.Visibility = Visibility.Visible;
                     break;
                 case ClaudeStatus.WaitingForInput:
                     AgentStatusDot.Fill = new SolidColorBrush(Colors.Orange);
-                    AgentStatusDot.Visibility = Visibility.Visible;
+                    AgentStatusText.Text = "Waiting for input";
+                    ClaudeStatusPanel.Visibility = Visibility.Visible;
                     break;
                 default:
-                    AgentStatusDot.Visibility = Visibility.Collapsed;
+                    ClaudeStatusPanel.Visibility = Visibility.Collapsed;
                     break;
             }
         });
