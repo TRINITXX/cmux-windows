@@ -105,14 +105,15 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         var daemonReady = App.DaemonConnectTask.IsCompletedSuccessfully && App.DaemonConnectTask.Result;
         if (daemonReady && App.DaemonClient.IsConnected) return;
 
-        var claudePanes = new List<string>();
+        var claudePanes = new List<(string paneId, string? sessionId)>();
         foreach (var leaf in RootNode.GetLeaves())
         {
             if (leaf.PaneId != null &&
                 Surface.PaneCustomNames.TryGetValue(leaf.PaneId, out var name) &&
                 name == "Claude Code")
             {
-                claudePanes.Add(leaf.PaneId);
+                Surface.PaneSnapshots.TryGetValue(leaf.PaneId, out var snapshot);
+                claudePanes.Add((leaf.PaneId, snapshot?.ClaudeSessionId));
             }
         }
 
@@ -120,13 +121,17 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         _ = Task.Run(async () =>
         {
-            // Wait for sessions to initialize
             await Task.Delay(3000);
-            foreach (var paneId in claudePanes)
+            foreach (var (paneId, sessionId) in claudePanes)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
-                    SendCommandToPane(paneId, "claude --dangerously-skip-permissions --effort max --resume");
+                    var cmd = "claude --dangerously-skip-permissions --effort max";
+                    if (!string.IsNullOrWhiteSpace(sessionId))
+                        cmd += $" --resume {sessionId}";
+                    else
+                        cmd += " --resume";
+                    SendCommandToPane(paneId, cmd);
                 });
                 await Task.Delay(500);
             }
@@ -320,6 +325,9 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
             if (_paneCommandHistory.TryGetValue(paneId, out var history))
                 state.CommandHistory = history.TakeLast(500).ToList();
+
+            // Save Claude Code session ID for resume after restart
+            state.ClaudeSessionId = App.ClaudeStatusService.GetSessionId(paneId);
 
             Surface.PaneSnapshots[paneId] = state;
         }

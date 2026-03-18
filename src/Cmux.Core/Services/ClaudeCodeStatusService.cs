@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using Cmux.Core.Models;
 using Cmux.Core.Terminal;
 
@@ -11,7 +12,7 @@ namespace Cmux.Core.Services;
 /// containing "working" or "waiting".
 /// Also detects Claude Code presence by scanning terminal output for the banner.
 /// </summary>
-public class ClaudeCodeStatusService : IDisposable
+public partial class ClaudeCodeStatusService : IDisposable
 {
     private static readonly string StatusDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -23,6 +24,10 @@ public class ClaudeCodeStatusService : IDisposable
 
     public event Action<string, ClaudeStatus, ClaudeStatus>? StatusChanged;
     public event Action<string>? ClaudeCodeDetected;
+    public event Action<string, string>? SessionIdCaptured; // paneId, sessionId
+
+    [GeneratedRegex(@"session_[A-Za-z0-9]{20,}")]
+    private static partial Regex SessionIdRegex();
 
     public ClaudeCodeStatusService()
     {
@@ -39,15 +44,27 @@ public class ClaudeCodeStatusService : IDisposable
 
         session.RawOutputReceived += data =>
         {
+            var text = Encoding.UTF8.GetString(data);
+
             // Detect Claude Code by scanning output for its banner
             if (!state.HasClaudeCode)
             {
-                var text = Encoding.UTF8.GetString(data);
                 if (text.Contains("Claude Code", StringComparison.OrdinalIgnoreCase) ||
                     text.Contains("/remote-control", StringComparison.OrdinalIgnoreCase))
                 {
                     state.HasClaudeCode = true;
                     ClaudeCodeDetected?.Invoke(paneId);
+                }
+            }
+
+            // Capture session ID from output (e.g. "session_01FeT5eLWJBuTZrEgrTBdvmT")
+            if (state.HasClaudeCode && state.SessionId == null)
+            {
+                var match = SessionIdRegex().Match(text);
+                if (match.Success)
+                {
+                    state.SessionId = match.Value;
+                    SessionIdCaptured?.Invoke(paneId, match.Value);
                 }
             }
         };
@@ -131,10 +148,16 @@ public class ClaudeCodeStatusService : IDisposable
         _pollTimer.Dispose();
     }
 
+    public string? GetSessionId(string paneId)
+    {
+        return _paneStates.TryGetValue(paneId, out var state) ? state.SessionId : null;
+    }
+
     private class PaneState
     {
         public TerminalSession Session { get; init; } = null!;
         public ClaudeStatus Status { get; set; } = ClaudeStatus.Idle;
         public bool HasClaudeCode { get; set; }
+        public string? SessionId { get; set; }
     }
 }
