@@ -132,17 +132,39 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         _ = Task.Run(async () =>
         {
-            // Wait for daemon connection to resolve and sessions to initialize
+            // Wait for daemon connection and sessions to fully initialize
             try { App.DaemonConnectTask.Wait(5000); } catch { }
-            await Task.Delay(3000);
+            await Task.Delay(5000);
 
-            // If daemon is connected, sessions are alive — don't relaunch
+            // Check multiple signals to determine if sessions are already alive
+            // 1. Daemon connected = sessions persisted
             if (App.DaemonClient.IsConnected) return;
 
-            // Also check if Claude Code is already detected in any pane (extra safety)
+            // 2. Any pane already has Claude detected from output = alive
             if (claudePanes.Any(p => App.ClaudeStatusService.GetStatus(p.paneId) != Cmux.Core.Models.ClaudeStatus.Idle))
                 return;
 
+            // 3. Check if terminal buffers have content (restored session = non-empty)
+            var hasLiveContent = false;
+            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            {
+                foreach (var (paneId, _) in claudePanes)
+                {
+                    var session = GetSession(paneId);
+                    if (session?.Buffer != null)
+                    {
+                        var text = session.Buffer.ExportPlainText(maxScrollbackLines: 5);
+                        if (!string.IsNullOrWhiteSpace(text) && text.Length > 20)
+                        {
+                            hasLiveContent = true;
+                            break;
+                        }
+                    }
+                }
+            });
+            if (hasLiveContent) return;
+
+            // All checks passed — sessions are dead, relaunch Claude Code
             foreach (var (paneId, sessionId) in claudePanes)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
