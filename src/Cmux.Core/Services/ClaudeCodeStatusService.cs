@@ -94,12 +94,12 @@ public class ClaudeCodeStatusService : IDisposable
 
             var bigOutputAge = (now - state.LastSustainedOutputTime).TotalSeconds;
 
-            if (bigOutputAge < 5)
+            if (bigOutputAge < 3)
             {
-                // Substantial output in the last 5s = Claude is generating
+                // Sustained output in the last 3s = Claude is generating
                 TransitionTo(paneId, state, ClaudeStatus.Working);
             }
-            else if (bigOutputAge >= 5 && bigOutputAge < 120)
+            else if (bigOutputAge >= 3 && bigOutputAge < 120)
             {
                 // No substantial output for 5+ seconds = waiting for input
                 TransitionTo(paneId, state, ClaudeStatus.WaitingForInput);
