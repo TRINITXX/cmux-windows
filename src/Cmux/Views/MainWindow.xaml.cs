@@ -744,6 +744,9 @@ public partial class MainWindow : Window
     private void ToolbarExpoStart_Click(object sender, RoutedEventArgs e)
         => OpenNewTabWithCommand("Expo Start", "npx expo start --clear");
 
+    private void ToolbarClaudeTab_Click(object sender, RoutedEventArgs e)
+        => OpenNewTabWithCommand("Claude Code", "claude --dangerously-skip-permissions --effort max");
+
     private void ToolbarEasBuildPreview_Click(object sender, RoutedEventArgs e)
         => OpenNewTabWithCommand("Build Preview", "eas build --platform ios --profile preview");
 
