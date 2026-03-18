@@ -169,12 +169,13 @@
                        FontSize="11" TextTrimming="CharacterEllipsis" />
         </StackPanel>
 
-        <!-- Working directory -->
-        <TextBlock x:Name="WorkingDirInfo" Grid.Row="3" Text="{Binding WorkingDirectory}"
+        <!-- Working directory (show end of path) -->
+        <TextBlock x:Name="WorkingDirInfo" Grid.Row="3"
                    Foreground="{StaticResource ForegroundDimBrush}"
                    FontSize="10" Margin="0,2,0,0"
                    TextTrimming="CharacterEllipsis"
-                   Visibility="{Binding WorkingDirectory, Converter={StaticResource NullToCollapsed}}" />
+                   Visibility="{Binding WorkingDirectory, Converter={StaticResource NullToCollapsed}}"
+                   Loaded="WorkingDirInfo_Loaded" />
 
         <!-- Latest notification text -->
         <TextBlock x:Name="LatestNotificationInfo" Grid.Row="4" Text="{Binding LatestNotificationText}"

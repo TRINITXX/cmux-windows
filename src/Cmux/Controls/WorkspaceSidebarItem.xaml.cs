@@ -213,6 +213,19 @@ public partial class WorkspaceSidebarItem : UserControl
         return true;
     }
 
+    private void WorkingDirInfo_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (Vm == null || WorkingDirInfo == null) return;
+        var fullPath = Vm.WorkingDirectory;
+        if (string.IsNullOrEmpty(fullPath)) { WorkingDirInfo.Text = ""; return; }
+
+        // Show only last 2 segments: "Desktop\VTC-Planner"
+        var parts = fullPath.TrimEnd('\\', '/').Split('\\', '/');
+        WorkingDirInfo.Text = parts.Length >= 2
+            ? parts[^2] + "\\" + parts[^1]
+            : parts[^1];
+    }
+
     private MainViewModel? FindMainViewModel()
     {
         var window = Window.GetWindow(this);
