@@ -18,6 +18,7 @@ public partial class MainWindow : Window
 {
     private MainViewModel ViewModel => (MainViewModel)DataContext;
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private readonly DispatcherTimer _autoSaveTimer;
     private ICollectionView? _workspaceView;
     public MainWindow()
     {
@@ -47,6 +48,15 @@ public partial class MainWindow : Window
         // Periodically refresh lightweight UI state (pane count, zoom icon)
         _uiRefreshTimer.Tick += (_, _) => RefreshSurfaceUiState();
         _uiRefreshTimer.Start();
+
+        // Auto-save session periodically so taskkill doesn't lose state
+        var interval = Cmux.Core.Config.SettingsService.Current.AutoSaveIntervalSeconds;
+        _autoSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Max(10, interval)) };
+        _autoSaveTimer.Tick += (_, _) =>
+        {
+            ViewModel.SaveSession(Left, Top, Width, Height, WindowState == WindowState.Maximized);
+        };
+        _autoSaveTimer.Start();
 
         // Subscribe to settings changes
         Cmux.Core.Config.SettingsService.SettingsChanged += OnSettingsChanged;
@@ -354,6 +364,7 @@ public partial class MainWindow : Window
     private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)
     {
         _uiRefreshTimer.Stop();
+        _autoSaveTimer.Stop();
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.SaveSession(Left, Top, Width, Height, WindowState == WindowState.Maximized);
     }
