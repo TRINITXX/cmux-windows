@@ -404,7 +404,10 @@ public class SplitPaneContainer : ContentControl
         headerGrid.Children.Add(closeButton);
         header.Child = headerGrid;
 
-        panel.Children.Add(header);
+        // Only show pane header if there are multiple panes
+        var leafCount = _surface?.RootNode?.GetLeaves().Count() ?? 1;
+        if (leafCount > 1)
+            panel.Children.Add(header);
         panel.Children.Add(terminal);
 
         var focusedAccent = GetThemeColor("AccentColor");
