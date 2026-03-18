@@ -377,6 +377,12 @@ public partial class MainWindow : Window
             UpdateSidebarLayout();
             return;
         }
+
+        if (e.PropertyName == nameof(MainViewModel.SelectedWorkspace))
+        {
+            // Focus the terminal when switching workspace via sidebar click
+            Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.Input);
+        }
     }
 
     private void OnKeyDown(object sender, KeyEventArgs e)
