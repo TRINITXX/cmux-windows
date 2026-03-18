@@ -67,6 +67,9 @@ public partial class App : Application
             return connected;
         });
 
+        // Forward daemon BEL events to status service (for daemon-mode detection)
+        DaemonClient.BellReceived += paneId => ClaudeStatusService.HandleDaemonBell(paneId);
+
         // Wire up Windows toast notifications
         NotificationService.NotificationAdded += notification =>
         {
