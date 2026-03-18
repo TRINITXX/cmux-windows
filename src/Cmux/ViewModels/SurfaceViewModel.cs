@@ -113,8 +113,10 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                 FocusedPaneId = firstLeaf.PaneId;
         }
 
-        // Auto-relaunch Claude Code in panes that had it before restart
-        RelaunchClaudeCodePanes();
+        // DISABLED: auto-relaunch caused phantom prompts in already-running sessions.
+        // The daemon keeps sessions alive across normal close/reopen.
+        // For a PC reboot, the user can manually relaunch Claude Code.
+        // RelaunchClaudeCodePanes();
     }
 
     private void RelaunchClaudeCodePanes()
