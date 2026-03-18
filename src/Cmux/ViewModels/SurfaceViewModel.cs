@@ -121,7 +121,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
-                    SendCommandToPane(paneId, "claude --dangerously-skip-permissions --effort max");
+                    SendCommandToPane(paneId, "claude --dangerously-skip-permissions --effort max --resume");
                 });
                 await Task.Delay(500);
             }
