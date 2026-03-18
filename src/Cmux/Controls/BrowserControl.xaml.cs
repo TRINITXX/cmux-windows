@@ -132,6 +132,23 @@ public partial class BrowserControl : UserControl
         WebView.CoreWebView2?.Reload();
     }
 
+    private void OpenInChrome_Click(object sender, RoutedEventArgs e)
+    {
+        var url = GetCurrentUrl();
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
+    }
+
     private void CloseBrowser_Click(object sender, RoutedEventArgs e)
     {
         CloseRequested?.Invoke();

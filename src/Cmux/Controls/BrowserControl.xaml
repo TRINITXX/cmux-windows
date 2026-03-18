@@ -18,6 +18,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <Button Grid.Column="0" Content="&#xE72B;" FontFamily="Segoe MDL2 Assets"
@@ -43,7 +44,10 @@
                          KeyDown="AddressBar_KeyDown" />
             </Border>
 
-            <Button Grid.Column="4" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets"
+            <Button Grid.Column="4" Content="&#xE774;" FontFamily="Segoe MDL2 Assets"
+                    Style="{StaticResource CmuxButton}" Click="OpenInChrome_Click"
+                    Width="32" Height="28" Padding="0" FontSize="12" ToolTip="Open in Chrome" />
+            <Button Grid.Column="5" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets"
                     Style="{StaticResource CmuxButton}" Click="CloseBrowser_Click"
                     Width="32" Height="28" Padding="0" Margin="0,0,4,0" FontSize="10" />
         </Grid>

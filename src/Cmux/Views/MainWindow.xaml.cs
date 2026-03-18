@@ -250,21 +250,17 @@ public partial class MainWindow : Window
             SurfaceTabBarControl.Margin = new Thickness(Math.Max(0, SidebarColumn.ActualWidth - 33), 0, 0, 0);
         };
 
-        // Auto-open browser when dev server starts
+        // Auto-open integrated browser when dev server starts
         App.PortDetectionService.DevServerStarted += (paneId, url) =>
         {
-            Dispatcher.Invoke(() =>
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = url,
-                        UseShellExecute = true
-                    });
-                }
-                catch { }
-            });
+            Dispatcher.Invoke(() => OpenIntegratedBrowser(url));
+        };
+
+        // Close integrated browser
+        IntegratedBrowser.CloseRequested += () =>
+        {
+            IntegratedBrowser.Visibility = Visibility.Collapsed;
+            BrowserColumn.Width = new GridLength(0);
         };
     }
 
@@ -526,6 +522,26 @@ public partial class MainWindow : Window
     }
 
     // Title bar handlers
+    private void OpenIntegratedBrowser(string url)
+    {
+        IntegratedBrowser.Visibility = Visibility.Visible;
+        BrowserColumn.Width = new GridLength(1, GridUnitType.Star);
+        IntegratedBrowser.Navigate(url);
+    }
+
+    private void ToolbarBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        if (IntegratedBrowser.Visibility == Visibility.Visible)
+        {
+            IntegratedBrowser.Visibility = Visibility.Collapsed;
+            BrowserColumn.Width = new GridLength(0);
+        }
+        else
+        {
+            OpenIntegratedBrowser("http://localhost:8081");
+        }
+    }
+
     private void ToggleMenuBar_Click(object sender, RoutedEventArgs e)
     {
         MenuBarPanel.Visibility = MenuBarPanel.Visibility == Visibility.Visible
