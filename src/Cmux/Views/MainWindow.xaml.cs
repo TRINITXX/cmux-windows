@@ -246,7 +246,7 @@ public partial class MainWindow : Window
         SidebarSplitter.DragCompleted += (_, _) =>
         {
             ViewModel.SidebarWidth = (int)SidebarColumn.ActualWidth;
-            SurfaceTabBarControl.Margin = new Thickness(SidebarColumn.ActualWidth + 10, 0, 0, 0);
+            SurfaceTabBarControl.Margin = new Thickness(SidebarColumn.ActualWidth, 0, 0, 0);
         };
 
         // Auto-open browser when dev server starts
@@ -926,7 +926,7 @@ public partial class MainWindow : Window
             SidebarBorder.Visibility = Visibility.Visible;
             SidebarSplitter.Visibility = Visibility.Visible;
             // Align tabs with terminal content (after sidebar + splitter)
-            SurfaceTabBarControl.Margin = new Thickness(width + 10, 0, 0, 0);
+            SurfaceTabBarControl.Margin = new Thickness(width, 0, 0, 0);
         }
         else
         {
