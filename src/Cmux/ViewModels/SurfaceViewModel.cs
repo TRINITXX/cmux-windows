@@ -112,11 +112,6 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
     private void RelaunchClaudeCodePanes()
     {
-        // Only relaunch if daemon is NOT connected (= fresh start, PC reboot, daemon was killed)
-        // When daemon IS connected, sessions are already alive — no need to relaunch
-        var daemonReady = App.DaemonConnectTask.IsCompletedSuccessfully && App.DaemonConnectTask.Result;
-        if (daemonReady && App.DaemonClient.IsConnected) return;
-
         var claudePanes = new List<(string paneId, string? sessionId)>();
         foreach (var leaf in RootNode.GetLeaves())
         {
@@ -133,7 +128,17 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         _ = Task.Run(async () =>
         {
+            // Wait for daemon connection to resolve and sessions to initialize
+            try { App.DaemonConnectTask.Wait(5000); } catch { }
             await Task.Delay(3000);
+
+            // If daemon is connected, sessions are alive — don't relaunch
+            if (App.DaemonClient.IsConnected) return;
+
+            // Also check if Claude Code is already detected in any pane (extra safety)
+            if (claudePanes.Any(p => App.ClaudeStatusService.GetStatus(p.paneId) != Cmux.Core.Models.ClaudeStatus.Idle))
+                return;
+
             foreach (var (paneId, sessionId) in claudePanes)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
