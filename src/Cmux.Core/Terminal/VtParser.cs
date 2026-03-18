@@ -169,6 +169,17 @@ public class VtParser
         {
             // DEL — ignore in ground
         }
+        else if (b >= 0xC0 && b <= 0xF7)
+        {
+            // Start of multi-byte UTF-8 (may arrive here after CSI sequence)
+            if (b < 0xE0) { _utf8Remaining = 1; _utf8Codepoint = b & 0x1F; }
+            else if (b < 0xF0) { _utf8Remaining = 2; _utf8Codepoint = b & 0x0F; }
+            else { _utf8Remaining = 3; _utf8Codepoint = b & 0x07; }
+        }
+        else if (b >= 0x80)
+        {
+            // Stray continuation byte — ignore
+        }
         else
         {
             HandlePrint((char)b);
