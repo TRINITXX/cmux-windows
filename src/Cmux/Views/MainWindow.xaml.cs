@@ -35,9 +35,12 @@ public partial class MainWindow : Window
         SnippetPickerControl.SnippetSelected += OnSnippetSelected;
         SnippetPickerControl.Closed += () => SnippetPickerControl.Visibility = Visibility.Collapsed;
 
-        // Focus terminal when switching tabs
+        // Focus terminal when switching, opening, or closing tabs
         SurfaceTabBarControl.SurfaceSelected += () =>
-            Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.Input);
+        {
+            // Use ApplicationIdle priority so the UI has time to rebuild after open/close
+            Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        };
 
         // Periodically refresh lightweight UI state (pane count, zoom icon)
         _uiRefreshTimer.Tick += (_, _) => RefreshSurfaceUiState();

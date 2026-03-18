@@ -119,6 +119,7 @@ public partial class SurfaceTabBar : UserControl
         {
             workspace.CloseSurface(surface);
             e.Handled = true;
+            SurfaceSelected?.Invoke();
         }
     }
 
@@ -208,12 +209,14 @@ public partial class SurfaceTabBar : UserControl
             if (DataContext is WorkspaceViewModel workspace)
                 workspace.CloseSurface(surface);
         }
+        SurfaceSelected?.Invoke();
     }
 
     private void AddTab_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is WorkspaceViewModel workspace)
             workspace.CreateNewSurface();
+        SurfaceSelected?.Invoke();
     }
 
     private void RenameTab_Click(object sender, RoutedEventArgs e)

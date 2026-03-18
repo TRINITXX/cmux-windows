@@ -23,6 +23,13 @@ public sealed class TerminalProcess : IDisposable
     {
         var shellCommand = command ?? DetectShell();
 
+        // Wrap shell in cmd /c chcp to force UTF-8 code page before launching
+        if (command == null)
+            shellCommand = $"cmd.exe /c chcp 65001 >nul && {shellCommand}";
+
+        // Build environment block
+        var envBlock = BuildUtf8Environment();
+
         // Initialize thread attribute list for ConPTY
         _attributeList = CreateAttributeList(console.Handle);
 
@@ -40,10 +47,13 @@ public sealed class TerminalProcess : IDisposable
             IntPtr.Zero,
             false,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-            IntPtr.Zero,
+            envBlock,
             workingDirectory,
             ref startupInfo,
             out _processInfo);
+
+        if (envBlock != IntPtr.Zero)
+            Marshal.FreeHGlobal(envBlock);
 
         if (!success)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create process with ConPTY.");
@@ -102,6 +112,31 @@ public sealed class TerminalProcess : IDisposable
             return comspec;
 
         return "cmd.exe";
+    }
+
+    /// <summary>
+    /// Builds a Unicode environment block with UTF-8 code page settings.
+    /// </summary>
+    private static IntPtr BuildUtf8Environment()
+    {
+        // Get current environment and add/override UTF-8 settings
+        var env = Environment.GetEnvironmentVariables();
+        env["PYTHONIOENCODING"] = "utf-8";
+        // Signal to .NET console apps to use UTF-8
+        env["DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION"] = "1";
+
+        // Build null-terminated Unicode environment block: "KEY=VALUE\0KEY=VALUE\0\0"
+        var sb = new System.Text.StringBuilder();
+        foreach (System.Collections.DictionaryEntry entry in env)
+        {
+            sb.Append(entry.Key).Append('=').Append(entry.Value).Append('\0');
+        }
+        sb.Append('\0'); // Double null terminator
+
+        var bytes = System.Text.Encoding.Unicode.GetBytes(sb.ToString());
+        var ptr = Marshal.AllocHGlobal(bytes.Length);
+        Marshal.Copy(bytes, 0, ptr, bytes.Length);
+        return ptr;
     }
 
     private static IntPtr CreateAttributeList(IntPtr conPtyHandle)
