@@ -149,24 +149,28 @@
             </Border>
         </Grid>
 
-        <!-- AI Agent badge (gradient pill) -->
-        <Border x:Name="AgentBadge" Grid.Row="1" CornerRadius="4" Padding="5,2" Margin="0,4,0,0"
-                HorizontalAlignment="Left"
-                Visibility="{Binding AgentLabel, Converter={StaticResource NullToCollapsed}}">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                    <GradientStop Color="#FF6C5CE7" Offset="0" />
-                    <GradientStop Color="#FFA855F7" Offset="1" />
-                </LinearGradientBrush>
-            </Border.Background>
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="{Binding AgentIcon}" FontFamily="Segoe MDL2 Assets"
-                           FontSize="9" Foreground="White" Margin="0,0,4,0"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding AgentLabel}" FontSize="10"
-                           Foreground="White" FontWeight="SemiBold" />
-            </StackPanel>
-        </Border>
+        <!-- AI Agent badge (gradient pill) + status dot -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,4,0,0"
+                    Visibility="{Binding AgentLabel, Converter={StaticResource NullToCollapsed}}">
+            <Border x:Name="AgentBadge" CornerRadius="4" Padding="5,2"
+                    HorizontalAlignment="Left">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#FF6C5CE7" Offset="0" />
+                        <GradientStop Color="#FFA855F7" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding AgentIcon}" FontFamily="Segoe MDL2 Assets"
+                               FontSize="9" Foreground="White" Margin="0,0,4,0"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding AgentLabel}" FontSize="10"
+                               Foreground="White" FontWeight="SemiBold" />
+                </StackPanel>
+            </Border>
+            <Ellipse x:Name="AgentStatusDot" Width="8" Height="8" Margin="6,0,0,0"
+                     VerticalAlignment="Center" Visibility="Collapsed" />
+        </StackPanel>
 
         <!-- Git branch -->
         <StackPanel x:Name="GitInfo" Grid.Row="2" Orientation="Horizontal" Margin="0,3,0,0"

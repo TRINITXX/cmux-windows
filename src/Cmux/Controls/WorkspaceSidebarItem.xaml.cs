@@ -2,6 +2,9 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shapes;
+using Cmux.Core.Models;
 using Cmux.ViewModels;
 using Cmux.Views;
 
@@ -12,6 +15,61 @@ public partial class WorkspaceSidebarItem : UserControl
     public WorkspaceSidebarItem()
     {
         InitializeComponent();
+        Loaded += (_, _) => App.ClaudeStatusService.StatusChanged += OnClaudeStatusChanged;
+        Unloaded += (_, _) => App.ClaudeStatusService.StatusChanged -= OnClaudeStatusChanged;
+    }
+
+    private void OnClaudeStatusChanged(string paneId, ClaudeStatus oldStatus, ClaudeStatus newStatus)
+    {
+        if (Vm == null) return;
+
+        // Check if this workspace contains this pane
+        var hasPaneInWorkspace = false;
+        foreach (var surface in Vm.Surfaces)
+        {
+            var leaves = surface.RootNode?.GetLeaves();
+            if (leaves == null) continue;
+            if (leaves.Any(l => l.PaneId == paneId))
+            {
+                hasPaneInWorkspace = true;
+                break;
+            }
+        }
+        if (!hasPaneInWorkspace) return;
+
+        // Get worst status across all panes in workspace
+        var worstStatus = ClaudeStatus.Idle;
+        foreach (var surface in Vm.Surfaces)
+        {
+            var leaves = surface.RootNode?.GetLeaves();
+            if (leaves == null) continue;
+            foreach (var leaf in leaves)
+            {
+                if (leaf.PaneId == null) continue;
+                var status = App.ClaudeStatusService.GetStatus(leaf.PaneId);
+                if (status == ClaudeStatus.Working) { worstStatus = ClaudeStatus.Working; break; }
+                if (status == ClaudeStatus.WaitingForInput) worstStatus = ClaudeStatus.WaitingForInput;
+            }
+            if (worstStatus == ClaudeStatus.Working) break;
+        }
+
+        Dispatcher.Invoke(() =>
+        {
+            switch (worstStatus)
+            {
+                case ClaudeStatus.Working:
+                    AgentStatusDot.Fill = new SolidColorBrush(Colors.LimeGreen);
+                    AgentStatusDot.Visibility = Visibility.Visible;
+                    break;
+                case ClaudeStatus.WaitingForInput:
+                    AgentStatusDot.Fill = new SolidColorBrush(Colors.Orange);
+                    AgentStatusDot.Visibility = Visibility.Visible;
+                    break;
+                default:
+                    AgentStatusDot.Visibility = Visibility.Collapsed;
+                    break;
+            }
+        });
     }
 
     private WorkspaceViewModel? Vm => DataContext as WorkspaceViewModel;
