@@ -713,6 +713,9 @@ public partial class MainWindow : Window
             ws.SelectedSurface.Name = "PowerShell";
     }
 
+    private static readonly string VmxPath = @"C:\Users\TRINITX\Documents\Virtual Machines\macOS 26\macOS 26.vmx";
+    private static readonly string VmRunPath = @"C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe";
+
     private void ToolbarSshMac_Click(object sender, RoutedEventArgs e)
     {
         var ws = ViewModel.SelectedWorkspace;
@@ -724,6 +727,57 @@ public partial class MainWindow : Window
 
         _ = Task.Run(async () =>
         {
+            // Start VM if not already running
+            try
+            {
+                var list = new System.Diagnostics.Process
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = VmRunPath,
+                        Arguments = "list",
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                list.Start();
+                var running = await list.StandardOutput.ReadToEndAsync();
+                await list.WaitForExitAsync();
+
+                if (!running.Contains("macOS 26", StringComparison.OrdinalIgnoreCase))
+                {
+                    // VM not running — start it
+                    var start = new System.Diagnostics.Process
+                    {
+                        StartInfo = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = VmRunPath,
+                            Arguments = $"start \"{VmxPath}\" nogui",
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        }
+                    };
+                    start.Start();
+                    await start.WaitForExitAsync();
+
+                    // Wait for SSH to become available
+                    for (int i = 0; i < 30; i++)
+                    {
+                        await Task.Delay(2000);
+                        try
+                        {
+                            using var tcp = new System.Net.Sockets.TcpClient();
+                            await tcp.ConnectAsync("192.168.1.32", 22);
+                            break; // SSH is up
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            // Connect SSH
             await Task.Delay(500);
             Application.Current.Dispatcher.Invoke(() =>
             {
