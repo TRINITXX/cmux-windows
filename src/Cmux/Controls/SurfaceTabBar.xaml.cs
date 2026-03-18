@@ -16,7 +16,7 @@ public partial class SurfaceTabBar : UserControl
     private SurfaceViewModel? _draggingSurface;
     private bool _isDragging;
 
-    // Search events removed (search bar moved to command palette)
+    public event Action? SurfaceSelected;
 
     public SurfaceTabBar()
     {
@@ -143,7 +143,10 @@ public partial class SurfaceTabBar : UserControl
             _draggingSurface = surface;
 
             if (DataContext is WorkspaceViewModel workspace)
+            {
                 workspace.SelectedSurface = surface;
+                SurfaceSelected?.Invoke();
+            }
         }
     }
 

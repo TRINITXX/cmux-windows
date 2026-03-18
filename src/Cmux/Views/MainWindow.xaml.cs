@@ -35,7 +35,9 @@ public partial class MainWindow : Window
         SnippetPickerControl.SnippetSelected += OnSnippetSelected;
         SnippetPickerControl.Closed += () => SnippetPickerControl.Visibility = Visibility.Collapsed;
 
-        // Search bar removed from tab bar; search available via Ctrl+Shift+F command palette
+        // Focus terminal when switching tabs
+        SurfaceTabBarControl.SurfaceSelected += () =>
+            Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.Input);
 
         // Periodically refresh lightweight UI state (pane count, zoom icon)
         _uiRefreshTimer.Tick += (_, _) => RefreshSurfaceUiState();
