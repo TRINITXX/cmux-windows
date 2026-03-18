@@ -246,6 +246,12 @@ public partial class MainWindow : Window
 
         PopulateTemplateMenu();
 
+        // Sync sidebar width to ViewModel when user drags the splitter
+        SidebarSplitter.DragCompleted += (_, _) =>
+        {
+            ViewModel.SidebarWidth = (int)SidebarColumn.ActualWidth;
+        };
+
         // Auto-open browser when dev server starts
         App.PortDetectionService.DevServerStarted += (paneId, url) =>
         {
