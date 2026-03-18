@@ -473,7 +473,7 @@
                             <Rectangle Width="1" Height="16" Fill="{StaticResource BorderBrush}" Margin="4,0" />
                             <Button Style="{StaticResource IconButton}" ToolTip="SSH to macOS VM"
                                     Click="ToolbarSshMac_Click">
-                                <TextBlock Text="&#xE838;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                                <TextBlock Text="&#xF8FF;" FontFamily="Segoe UI Symbol" FontSize="14" />
                             </Button>
                             <Button Style="{StaticResource IconButton}" ToolTip="New PowerShell Pane"
                                     Click="ToolbarPowerShell_Click">
