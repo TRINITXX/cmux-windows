@@ -158,17 +158,6 @@
                        Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center" />
         </StackPanel>
 
-        <!-- Git branch -->
-        <StackPanel x:Name="GitInfo" Grid.Row="2" Orientation="Horizontal" Margin="0,3,0,0"
-                    Visibility="{Binding GitBranch, Converter={StaticResource NullToCollapsed}}">
-            <TextBlock Text="&#xE8AD;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                       Foreground="{StaticResource ForegroundDimBrush}" Margin="0,0,4,0"
-                       VerticalAlignment="Center" />
-            <TextBlock Text="{Binding GitBranch}"
-                       Foreground="{StaticResource AccentBrush}"
-                       FontSize="11" TextTrimming="CharacterEllipsis" />
-        </StackPanel>
-
         <!-- Working directory (show last 2 segments) -->
         <TextBlock x:Name="WorkingDirInfo" Grid.Row="3"
                    Text="{Binding WorkingDirectory}"

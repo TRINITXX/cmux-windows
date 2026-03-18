@@ -235,15 +235,10 @@ public partial class MainWindow : Window
 
         RefreshSurfaceUiState();
         UpdateSidebarLayout();
-        UpdateDaemonStatus();
         UpdateWindowChrome();
         SizeChanged += (_, _) => UpdateWindowClip();
         StateChanged += (_, _) => UpdateWindowChrome();
         UpdateWindowClip();
-
-        // Monitor daemon connection changes
-        App.DaemonClient.Connected += () => Dispatcher.BeginInvoke(UpdateDaemonStatus);
-        App.DaemonClient.Disconnected += () => Dispatcher.BeginInvoke(UpdateDaemonStatus);
 
         PopulateTemplateMenu();
 
@@ -251,6 +246,7 @@ public partial class MainWindow : Window
         SidebarSplitter.DragCompleted += (_, _) =>
         {
             ViewModel.SidebarWidth = (int)SidebarColumn.ActualWidth;
+            SurfaceTabBarControl.Margin = new Thickness(SidebarColumn.ActualWidth + 10, 0, 0, 0);
         };
 
         // Auto-open browser when dev server starts
@@ -269,18 +265,6 @@ public partial class MainWindow : Window
                 catch { }
             });
         };
-    }
-
-    private void UpdateDaemonStatus()
-    {
-        var connected = App.DaemonClient.IsConnected;
-        DaemonStatusDot.Fill = connected
-            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x34, 0xD3, 0x99)) // green
-            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x6B, 0x72, 0x80)); // gray
-        DaemonStatusText.Text = connected ? "Daemon" : "Local";
-        DaemonStatusBorder.ToolTip = connected
-            ? "Connected to cmux-daemon — sessions persist across restarts"
-            : "Running locally — sessions will not persist";
     }
 
     private void PopulateTemplateMenu()
@@ -941,6 +925,8 @@ public partial class MainWindow : Window
             SidebarColumn.MaxWidth = 500;
             SidebarBorder.Visibility = Visibility.Visible;
             SidebarSplitter.Visibility = Visibility.Visible;
+            // Align tabs with terminal content (after sidebar + splitter)
+            SurfaceTabBarControl.Margin = new Thickness(width + 10, 0, 0, 0);
         }
         else
         {
@@ -949,6 +935,7 @@ public partial class MainWindow : Window
             SidebarColumn.MaxWidth = 0;
             SidebarBorder.Visibility = Visibility.Collapsed;
             SidebarSplitter.Visibility = Visibility.Collapsed;
+            SurfaceTabBarControl.Margin = new Thickness(0);
         }
     }
 
@@ -1104,16 +1091,10 @@ public partial class MainWindow : Window
         var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
         if (surface == null)
         {
-            PaneCountText.Text = "0 panes";
             ToolbarZoomIcon.Text = "\uE740";
             ToolbarZoomButton.ToolTip = "Zoom Pane (Ctrl+Shift+Z)";
             return;
         }
-
-        var paneCount = surface.RootNode.GetLeaves().Count();
-        PaneCountText.Text = surface.IsZoomed
-            ? $"{paneCount} panes (1 zoomed)"
-            : paneCount == 1 ? "1 pane" : $"{paneCount} panes";
 
         ToolbarZoomIcon.Text = surface.IsZoomed ? "\uE73F" : "\uE740";
         ToolbarZoomButton.ToolTip = surface.IsZoomed

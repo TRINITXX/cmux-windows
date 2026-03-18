@@ -159,7 +159,7 @@
                         <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="14" />
                     </Button>
 
-                    <!-- Surface tabs (moved from content area) -->
+                    <!-- Surface tabs (aligned with terminal content area) -->
                     <controls:SurfaceTabBar x:Name="SurfaceTabBarControl" Grid.Column="1"
                         DataContext="{Binding SelectedWorkspace}"
                         WindowChrome.IsHitTestVisibleInChrome="True"
@@ -440,7 +440,6 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" /> <!-- Toolbar -->
                         <RowDefinition Height="*" />    <!-- Terminal content -->
-                        <RowDefinition Height="Auto" /> <!-- Status bar -->
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -542,56 +541,7 @@
                         x:Name="SnippetPickerControl"
                         Visibility="Collapsed" />
 
-                    <!-- Status bar -->
-                    <Border Grid.Row="2" Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}"
-                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
-                            Padding="10,3">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Orientation="Horizontal">
-                                <!-- Git branch -->
-                                <TextBlock Text="&#xE8AD;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                           Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center"
-                                           Margin="0,0,4,0" />
-                                <TextBlock Text="{Binding SelectedWorkspace.GitBranch, FallbackValue=''}" FontSize="11"
-                                           Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"
-                                           Margin="0,0,16,0" />
-                                <!-- Working directory -->
-                                <TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                           Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center"
-                                           Margin="0,0,4,0" />
-                                <TextBlock Text="{Binding SelectedWorkspace.WorkingDirectory, FallbackValue=''}" FontSize="11"
-                                           Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis" MaxWidth="300" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <!-- Pane count -->
-                                <TextBlock Text="&#xE737;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                           Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center"
-                                           Margin="0,0,4,0" />
-                                <TextBlock x:Name="PaneCountText" Text="1 pane" FontSize="11"
-                                           Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center"
-                                           Margin="0,0,12,0" />
-                                <!-- Daemon status -->
-                                <Border x:Name="DaemonStatusBorder" CornerRadius="3" Padding="5,1" Margin="0,0,12,0"
-                                        VerticalAlignment="Center" Background="Transparent">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Ellipse x:Name="DaemonStatusDot" Width="6" Height="6"
-                                                 Fill="#FF6B7280" Margin="0,0,4,0" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="DaemonStatusText" Text="Daemon" FontSize="10"
-                                                   Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </Border>
-                                <!-- Shortcuts hint -->
-                                <TextBlock Text="Ctrl+Shift+P: Commands" FontSize="10"
-                                           Foreground="{StaticResource ForegroundDimBrush}" VerticalAlignment="Center"
-                                           Opacity="0.6" />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
+                    <!-- Status bar removed for max terminal space -->
 
                 </Grid>
             </Grid>
