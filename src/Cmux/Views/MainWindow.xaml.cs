@@ -1075,8 +1075,30 @@ public partial class MainWindow : Window
 
     private void FocusTerminal()
     {
-        // Return focus to the active terminal pane
-        ContentArea.Focus();
+        // Find and focus the active TerminalControl
+        var terminal = FindFocusedTerminal(SplitPaneContainerControl);
+        if (terminal != null)
+        {
+            terminal.Focus();
+            Keyboard.Focus(terminal);
+        }
+        else
+        {
+            ContentArea.Focus();
+        }
+    }
+
+    private static Controls.TerminalControl? FindFocusedTerminal(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is Controls.TerminalControl tc && tc.IsPaneFocused)
+                return tc;
+            var found = FindFocusedTerminal(child);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private void RefreshSurfaceUiState()
