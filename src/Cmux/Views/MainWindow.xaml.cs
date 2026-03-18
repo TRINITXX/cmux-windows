@@ -267,6 +267,8 @@ public partial class MainWindow : Window
         };
     }
 
+    private readonly ContextMenu TemplateMenu = new();
+
     private void PopulateTemplateMenu()
     {
         TemplateMenu.Items.Clear();

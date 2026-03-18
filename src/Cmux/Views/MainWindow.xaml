@@ -352,27 +352,6 @@
                             </ListBox.ItemContainerStyle>
                         </ListBox>
 
-                        <!-- Sidebar footer (template button only) -->
-                        <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}"
-                                BorderThickness="0,1,0,0" Padding="6,4">
-                            <StackPanel>
-                                <Button x:Name="TemplateButton"
-                                        Style="{StaticResource CmuxButton}"
-                                        HorizontalAlignment="Stretch"
-                                        ToolTip="New from Template"
-                                        Click="TemplateButton_Click">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="&#xE8F1;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                                   Margin="0,0,6,0" Opacity="0.6" />
-                                        <TextBlock Text="Template" FontSize="12" />
-                                    </StackPanel>
-                                    <Button.ContextMenu>
-                                        <ContextMenu x:Name="TemplateMenu" />
-                                    </Button.ContextMenu>
-                                </Button>
-
-                            </StackPanel>
-                        </Border>
                     </Grid>
                 </Border>
 
