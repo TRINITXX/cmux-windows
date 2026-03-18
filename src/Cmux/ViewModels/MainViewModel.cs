@@ -450,7 +450,7 @@ public partial class MainViewModel : ObservableObject
 
         if (session.Window != null)
         {
-            SidebarWidth = Math.Clamp(session.Window.SidebarWidth, 220, 500);
+            SidebarWidth = Math.Clamp(session.Window.SidebarWidth, 120, 500);
             SidebarVisible = session.Window.SidebarVisible;
             CompactSidebar = false;
         }
