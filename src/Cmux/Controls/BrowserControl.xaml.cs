@@ -19,7 +19,16 @@ public partial class BrowserControl : UserControl
         InitializeWebView();
     }
 
+    private Task? _initTask;
+    private string? _pendingUrl;
+
     private async void InitializeWebView()
+    {
+        _initTask = InitializeWebViewCore();
+        await _initTask;
+    }
+
+    private async Task InitializeWebViewCore()
     {
         try
         {
@@ -27,6 +36,14 @@ public partial class BrowserControl : UserControl
             WebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
             WebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+
+            // Navigate to pending URL if any
+            if (_pendingUrl != null)
+            {
+                WebView.CoreWebView2.Navigate(_pendingUrl);
+                AddressBar.Text = _pendingUrl;
+                _pendingUrl = null;
+            }
         }
         catch (Exception ex)
         {
@@ -35,7 +52,7 @@ public partial class BrowserControl : UserControl
     }
 
     /// <summary>Navigate to a URL.</summary>
-    public void Navigate(string url)
+    public async void Navigate(string url)
     {
         if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
@@ -43,14 +60,25 @@ public partial class BrowserControl : UserControl
             url = "https://" + url;
         }
 
-        try
+        AddressBar.Text = url;
+
+        if (WebView.CoreWebView2 != null)
         {
-            WebView.CoreWebView2?.Navigate(url);
-            AddressBar.Text = url;
+            try { WebView.CoreWebView2.Navigate(url); } catch { }
         }
-        catch
+        else
         {
-            // Invalid URL
+            // WebView not ready yet — queue the URL
+            _pendingUrl = url;
+            if (_initTask != null)
+            {
+                await _initTask;
+                if (_pendingUrl == url && WebView.CoreWebView2 != null)
+                {
+                    try { WebView.CoreWebView2.Navigate(url); } catch { }
+                    _pendingUrl = null;
+                }
+            }
         }
     }
 
