@@ -87,7 +87,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             }
         }
 
-        // Set fallback CWD for status detection (session.WorkingDirectory may be null in daemon mode)
+        // Set fallback CWD and restore Claude Code detection from session
         foreach (var leaf in RootNode.GetLeaves())
         {
             if (leaf.PaneId != null)
@@ -96,6 +96,14 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                 var cwd = snap?.WorkingDirectory;
                 if (!string.IsNullOrEmpty(cwd))
                     App.ClaudeStatusService.SetPaneWorkingDirectory(leaf.PaneId, cwd);
+
+                // If pane was named "Claude Code", mark it as detected
+                // (banner was already shown before restart, won't appear again)
+                if (Surface.PaneCustomNames.TryGetValue(leaf.PaneId, out var name) &&
+                    name == "Claude Code")
+                {
+                    App.ClaudeStatusService.MarkAsClaudeCode(leaf.PaneId);
+                }
             }
         }
 

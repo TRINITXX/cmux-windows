@@ -43,6 +43,12 @@ public partial class ClaudeCodeStatusService : IDisposable
             state.FallbackCwd = cwd;
     }
 
+    public void MarkAsClaudeCode(string paneId)
+    {
+        if (_paneStates.TryGetValue(paneId, out var state))
+            state.HasClaudeCode = true;
+    }
+
     public void RegisterPane(string paneId, TerminalSession session)
     {
         var state = new PaneState { Session = session };
