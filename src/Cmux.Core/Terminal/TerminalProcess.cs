@@ -21,11 +21,22 @@ public sealed class TerminalProcess : IDisposable
 
     public TerminalProcess(PseudoConsole console, string? command = null, string? workingDirectory = null)
     {
-        var shellCommand = command ?? DetectShell();
-
-        // Force UTF-8 code page for proper Unicode rendering
-        // Set via environment variable that pwsh/powershell reads at startup
-        // The actual chcp is done in the PowerShell profile
+        string shellCommand;
+        if (command != null)
+        {
+            shellCommand = command;
+        }
+        else
+        {
+            var shellPath = DetectShell();
+            // Wrap shell startup with chcp 65001 to set UTF-8 code page on the ConPTY.
+            // Without this, ConPTY uses the OEM code page (850) and mangles UTF-8 output
+            // (QR codes, Unicode block characters, etc.)
+            if (shellPath.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase))
+                shellCommand = "cmd.exe /k chcp 65001 > nul";
+            else
+                shellCommand = $"cmd.exe /c chcp 65001 > nul && \"{shellPath}\"";
+        }
 
         // Build environment block
         var envBlock = BuildUtf8Environment();
@@ -124,6 +135,12 @@ public sealed class TerminalProcess : IDisposable
         env["PYTHONIOENCODING"] = "utf-8";
         // Signal to .NET console apps to use UTF-8
         env["DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION"] = "1";
+        // Remove terminal-identity env vars so apps (Expo, etc.) don't use
+        // sextant chars (U+1FB00+) which our VtParser can't handle (BMP only).
+        env.Remove("WT_SESSION");
+        env.Remove("TERM_PROGRAM");
+        env.Remove("KITTY_WINDOW_ID");
+        env.Remove("ALACRITTY_WINDOW_ID");
 
         // Build null-terminated Unicode environment block: "KEY=VALUE\0KEY=VALUE\0\0"
         var sb = new System.Text.StringBuilder();
