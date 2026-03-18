@@ -87,6 +87,18 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             }
         }
 
+        // Set fallback CWD for status detection (session.WorkingDirectory may be null in daemon mode)
+        foreach (var leaf in RootNode.GetLeaves())
+        {
+            if (leaf.PaneId != null)
+            {
+                Surface.PaneSnapshots.TryGetValue(leaf.PaneId, out var snap);
+                var cwd = snap?.WorkingDirectory;
+                if (!string.IsNullOrEmpty(cwd))
+                    App.ClaudeStatusService.SetPaneWorkingDirectory(leaf.PaneId, cwd);
+            }
+        }
+
         if (_focusedPaneId == null)
         {
             var firstLeaf = _rootNode.GetLeaves().FirstOrDefault();

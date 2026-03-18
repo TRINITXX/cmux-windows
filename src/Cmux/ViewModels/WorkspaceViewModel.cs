@@ -59,6 +59,7 @@ public partial class WorkspaceViewModel : ObservableObject, IDisposable
         _name = workspace.Name;
         _iconGlyph = workspace.IconGlyph;
         _accentColor = workspace.AccentColor;
+        _workingDirectory = workspace.WorkingDirectory;
         _notificationService = notificationService;
 
         // Create surface VMs for existing surfaces

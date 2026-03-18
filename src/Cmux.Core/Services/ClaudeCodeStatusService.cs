@@ -37,6 +37,12 @@ public partial class ClaudeCodeStatusService : IDisposable
         _pollTimer.Start();
     }
 
+    public void SetPaneWorkingDirectory(string paneId, string? cwd)
+    {
+        if (_paneStates.TryGetValue(paneId, out var state))
+            state.FallbackCwd = cwd;
+    }
+
     public void RegisterPane(string paneId, TerminalSession session)
     {
         var state = new PaneState { Session = session };
@@ -110,11 +116,8 @@ public partial class ClaudeCodeStatusService : IDisposable
             }
 
             // Match pane to status file by workspace folder name
-            var cwd = state.Session.WorkingDirectory;
-            if (string.IsNullOrEmpty(cwd))
-            {
-                continue;
-            }
+            var cwd = state.Session.WorkingDirectory ?? state.FallbackCwd;
+            if (string.IsNullOrEmpty(cwd)) continue;
 
             var folderName = Path.GetFileName(cwd.TrimEnd('/', '\\'));
             if (string.IsNullOrEmpty(folderName)) continue;
@@ -159,5 +162,6 @@ public partial class ClaudeCodeStatusService : IDisposable
         public ClaudeStatus Status { get; set; } = ClaudeStatus.Idle;
         public bool HasClaudeCode { get; set; }
         public string? SessionId { get; set; }
+        public string? FallbackCwd { get; set; }
     }
 }
