@@ -24,6 +24,7 @@
                     <Border x:Name="tabBorder" Padding="14,6" Cursor="Hand"
                             Margin="2,4,2,4" CornerRadius="6"
                             MouseLeftButtonDown="Tab_Click"
+                            MouseUp="Tab_MouseUp"
                             MouseMove="Tab_MouseMove"
                             AllowDrop="True"
                             Drop="Tab_Drop"

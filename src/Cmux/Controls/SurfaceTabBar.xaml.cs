@@ -139,6 +139,17 @@ public partial class SurfaceTabBar : UserControl
         return null;
     }
 
+    private void Tab_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Middle &&
+            sender is FrameworkElement fe && fe.DataContext is SurfaceViewModel surface &&
+            DataContext is WorkspaceViewModel workspace)
+        {
+            workspace.CloseSurface(surface);
+            e.Handled = true;
+        }
+    }
+
     private void Tab_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement fe && fe.DataContext is SurfaceViewModel surface)
