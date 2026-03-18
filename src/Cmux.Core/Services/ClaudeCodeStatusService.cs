@@ -90,16 +90,24 @@ public partial class ClaudeCodeStatusService : IDisposable
     {
         if (_disposed) return;
 
-        // Read all status files once
+        // Read all status files once, check file age to detect stale "working"
         var statusByFolder = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             if (Directory.Exists(StatusDir))
             {
+                var now = DateTime.UtcNow;
                 foreach (var file in Directory.GetFiles(StatusDir, "*.txt"))
                 {
                     var folderName = Path.GetFileNameWithoutExtension(file);
                     var content = File.ReadAllText(file).Trim().ToLowerInvariant();
+                    var fileAge = (now - File.GetLastWriteTimeUtc(file)).TotalSeconds;
+
+                    // If file says "working" but hasn't been updated in 30s,
+                    // the Stop hook probably didn't fire — treat as waiting
+                    if (content == "working" && fileAge > 30)
+                        content = "waiting";
+
                     statusByFolder[folderName] = content;
                 }
             }
