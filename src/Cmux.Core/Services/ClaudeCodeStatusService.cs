@@ -39,15 +39,24 @@ public class ClaudeCodeStatusService : IDisposable
                 }
             }
 
-            // Only count substantial output as "working" (ignore cursor moves, redraws)
-            // Small bursts (<50 bytes) are usually terminal UI updates, not Claude generating
+            // Track output frequency to distinguish Claude working (sustained output)
+            // from redraws (single burst on tab switch)
             if (data.Length > 50)
             {
-                state.LastBigOutputTime = DateTime.UtcNow;
-                state.BigOutputCount++;
+                var now = DateTime.UtcNow;
+                state.RecentBigChunks.Enqueue(now);
+                // Keep only chunks from last 5 seconds
+                while (state.RecentBigChunks.Count > 0 &&
+                       (now - state.RecentBigChunks.Peek()).TotalSeconds > 5)
+                    state.RecentBigChunks.Dequeue();
+
+                // Need 3+ big chunks in 5s to count as "working" (sustained output)
+                if (state.RecentBigChunks.Count >= 3)
+                    state.LastSustainedOutputTime = now;
             }
 
-            if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput && data.Length > 50)
+            if (state.HasClaudeCode && state.Status == ClaudeStatus.WaitingForInput &&
+                state.RecentBigChunks.Count >= 3)
                 TransitionTo(paneId, state, ClaudeStatus.Working);
         };
 
@@ -83,7 +92,7 @@ public class ClaudeCodeStatusService : IDisposable
                 continue;
             }
 
-            var bigOutputAge = (now - state.LastBigOutputTime).TotalSeconds;
+            var bigOutputAge = (now - state.LastSustainedOutputTime).TotalSeconds;
 
             if (bigOutputAge < 5)
             {
@@ -125,8 +134,8 @@ public class ClaudeCodeStatusService : IDisposable
         public TerminalSession Session { get; init; } = null!;
         public ClaudeStatus Status { get; set; } = ClaudeStatus.Idle;
         public DateTime LastOutputTime { get; set; } = DateTime.MinValue;
-        public DateTime LastBigOutputTime { get; set; } = DateTime.MinValue;
-        public long BigOutputCount { get; set; }
+        public DateTime LastSustainedOutputTime { get; set; } = DateTime.MinValue;
+        public Queue<DateTime> RecentBigChunks { get; } = new();
         public bool HasClaudeCode { get; set; }
     }
 }
