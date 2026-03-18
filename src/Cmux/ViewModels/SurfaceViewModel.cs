@@ -67,6 +67,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         // Auto-rename pane to "Claude Code" when detected
         App.ClaudeStatusService.ClaudeCodeDetected += OnClaudeCodeDetected;
+        App.TitleService.TitleGenerated += OnTitleGenerated;
 
         // Start terminal sessions for all leaf nodes
         foreach (var leaf in _rootNode.GetLeaves())
@@ -97,10 +98,8 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                 if (!string.IsNullOrEmpty(cwd))
                     App.ClaudeStatusService.SetPaneWorkingDirectory(leaf.PaneId, cwd);
 
-                // If pane was named "Claude Code", mark it as detected
-                // (banner was already shown before restart, won't appear again)
-                if (Surface.PaneCustomNames.TryGetValue(leaf.PaneId, out var name) &&
-                    name == "Claude Code")
+                // Restore Claude Code detection from saved flag
+                if (snap?.IsClaudeCode == true)
                 {
                     App.ClaudeStatusService.MarkAsClaudeCode(leaf.PaneId);
                 }
@@ -123,13 +122,10 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         var claudePanes = new List<(string paneId, string? sessionId)>();
         foreach (var leaf in RootNode.GetLeaves())
         {
-            if (leaf.PaneId != null &&
-                Surface.PaneCustomNames.TryGetValue(leaf.PaneId, out var name) &&
-                name == "Claude Code")
-            {
-                Surface.PaneSnapshots.TryGetValue(leaf.PaneId, out var snapshot);
-                claudePanes.Add((leaf.PaneId, snapshot?.ClaudeSessionId));
-            }
+            if (leaf.PaneId == null) continue;
+            Surface.PaneSnapshots.TryGetValue(leaf.PaneId, out var snapshot);
+            if (snapshot?.IsClaudeCode == true)
+                claudePanes.Add((leaf.PaneId, snapshot.ClaudeSessionId));
         }
 
         if (claudePanes.Count == 0) return;
@@ -254,9 +250,18 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         if (_sessions.ContainsKey(paneId))
         {
             SetPaneCustomName(paneId, "Claude Code");
-            // Also rename the surface tab if it still has the default name
+            App.TitleService.RegisterPane(paneId);
             if (Name.StartsWith("Terminal"))
                 Name = "Claude Code";
+        }
+    }
+
+    private void OnTitleGenerated(string paneId, string title)
+    {
+        if (_sessions.ContainsKey(paneId))
+        {
+            SetPaneCustomName(paneId, title);
+            Name = title;
         }
     }
 
@@ -351,8 +356,9 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             if (_paneCommandHistory.TryGetValue(paneId, out var history))
                 state.CommandHistory = history.TakeLast(500).ToList();
 
-            // Save Claude Code session ID for resume after restart
+            // Save Claude Code state for resume after restart
             state.ClaudeSessionId = App.ClaudeStatusService.GetSessionId(paneId);
+            state.IsClaudeCode = App.ClaudeStatusService.IsClaudeCode(paneId);
 
             Surface.PaneSnapshots[paneId] = state;
         }
@@ -369,6 +375,10 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             return;
 
         AppendToCommandHistory(paneId, sanitized);
+
+        // Feed to title service for Haiku auto-titling
+        if (App.ClaudeStatusService.IsClaudeCode(paneId))
+            App.TitleService.OnUserMessage(paneId, command);
 
         var cwd = _sessions.TryGetValue(paneId, out var session)
             ? session.WorkingDirectory
@@ -741,6 +751,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         CapturePaneSnapshotsForPersistence();
 
         App.ClaudeStatusService.ClaudeCodeDetected -= OnClaudeCodeDetected;
+        App.TitleService.TitleGenerated -= OnTitleGenerated;
 
         // Unwire daemon events
         var daemon = App.DaemonClient;

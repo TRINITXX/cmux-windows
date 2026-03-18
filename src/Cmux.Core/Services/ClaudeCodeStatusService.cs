@@ -49,6 +49,11 @@ public partial class ClaudeCodeStatusService : IDisposable
             state.HasClaudeCode = true;
     }
 
+    public bool IsClaudeCode(string paneId)
+    {
+        return _paneStates.TryGetValue(paneId, out var state) && state.HasClaudeCode;
+    }
+
     public void RegisterPane(string paneId, TerminalSession session)
     {
         var state = new PaneState { Session = session };

@@ -18,6 +18,7 @@ public partial class App : Application
     public static ClaudeCodeStatusService ClaudeStatusService { get; } = new();
     public static PortDetectionService PortDetectionService { get; } = new();
     public static WorkspaceTemplateService TemplateService { get; } = new();
+    public static ClaudeCodeTitleService TitleService { get; } = new();
     public static DaemonClient DaemonClient { get; } = new();
     public static Task<bool> DaemonConnectTask { get; private set; } = Task.FromResult(false);
 

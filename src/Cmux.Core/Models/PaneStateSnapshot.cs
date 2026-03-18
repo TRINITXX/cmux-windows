@@ -9,4 +9,5 @@ public class PaneStateSnapshot
     public List<string> CommandHistory { get; set; } = [];
     public TerminalBufferSnapshot? BufferSnapshot { get; set; }
     public string? ClaudeSessionId { get; set; }
+    public bool IsClaudeCode { get; set; }
 }
