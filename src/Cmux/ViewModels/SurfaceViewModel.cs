@@ -65,6 +65,9 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         daemon.BellReceived += OnDaemonBellReceived;
         daemon.Disconnected += OnDaemonDisconnected;
 
+        // Auto-rename pane to "Claude Code" when detected
+        App.ClaudeStatusService.ClaudeCodeDetected += OnClaudeCodeDetected;
+
         // Start terminal sessions for all leaf nodes
         foreach (var leaf in _rootNode.GetLeaves())
         {
@@ -176,6 +179,12 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
             Surface.PaneCustomNames[paneId] = name.Trim();
 
         OnPropertyChanged(nameof(RootNode));
+    }
+
+    private void OnClaudeCodeDetected(string paneId)
+    {
+        if (_sessions.ContainsKey(paneId))
+            SetPaneCustomName(paneId, "Claude Code");
     }
 
     public void SwapPanes(string paneId1, string paneId2)
@@ -654,6 +663,8 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         CapturePaneSnapshotsForPersistence();
+
+        App.ClaudeStatusService.ClaudeCodeDetected -= OnClaudeCodeDetected;
 
         // Unwire daemon events
         var daemon = App.DaemonClient;

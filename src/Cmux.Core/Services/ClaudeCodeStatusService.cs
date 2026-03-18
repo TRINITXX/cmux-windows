@@ -12,6 +12,7 @@ public class ClaudeCodeStatusService : IDisposable
     private bool _disposed;
 
     public event Action<string, ClaudeStatus, ClaudeStatus>? StatusChanged;
+    public event Action<string>? ClaudeCodeDetected; // paneId
 
     public ClaudeCodeStatusService()
     {
@@ -36,6 +37,7 @@ public class ClaudeCodeStatusService : IDisposable
                     text.Contains("/remote-control", StringComparison.OrdinalIgnoreCase))
                 {
                     state.HasClaudeCode = true;
+                    ClaudeCodeDetected?.Invoke(paneId);
                 }
             }
 
