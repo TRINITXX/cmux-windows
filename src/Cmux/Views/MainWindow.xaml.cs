@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _uiRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private readonly DispatcherTimer _autoSaveTimer;
     private ICollectionView? _workspaceView;
+    private bool _zenMode;
     public MainWindow()
     {
         InitializeComponent();
@@ -369,6 +370,14 @@ public partial class MainWindow : Window
         bool alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
 
         // === App-level shortcuts that always work, even with terminal focus ===
+
+        // F11: Zen mode (hide sidebar, tab bar, toolbar)
+        if (e.Key == Key.F11 && !ctrl && !shift && !alt)
+        {
+            ToggleZenMode();
+            e.Handled = true;
+            return;
+        }
 
         // Ctrl+Tab / Ctrl+Shift+Tab: cycle surfaces
         if (ctrl && e.Key == Key.Tab)
@@ -942,6 +951,29 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ToggleZenMode()
+    {
+        _zenMode = !_zenMode;
+        if (_zenMode)
+        {
+            // Hide everything except terminal
+            SidebarBorder.Visibility = Visibility.Collapsed;
+            SidebarSplitter.Visibility = Visibility.Collapsed;
+            SidebarColumn.Width = new GridLength(0);
+            SidebarColumn.MinWidth = 0;
+            SidebarColumn.MaxWidth = 0;
+            SurfaceTabBarControl.Visibility = Visibility.Collapsed;
+            ToolbarBorder.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            // Restore
+            SurfaceTabBarControl.Visibility = Visibility.Visible;
+            ToolbarBorder.Visibility = Visibility.Visible;
+            UpdateSidebarLayout();
+        }
+    }
+
     private static bool IsTerminalFocusActive()
     {
         var current = Keyboard.FocusedElement as DependencyObject;
@@ -985,6 +1017,7 @@ public partial class MainWindow : Window
             new() { Id = "layout-3col", Label = "Layout: 3 Columns", Icon = "\uE745", Category = "Layout", Execute = () => ApplyLayout(3, 1) },
             new() { Id = "layout-grid", Label = "Layout: Grid 2x2", Icon = "\uF0E2", Category = "Layout", Execute = () => ApplyLayout(2, 2) },
             new() { Id = "layout-main-stack", Label = "Layout: Main + Stack", Icon = "\uE745", Category = "Layout", Execute = () => ApplyMainStackLayout() },
+            new() { Id = "zen-mode", Label = "Zen Mode", Icon = "\uE740", Shortcut = "F11", Category = "View", Execute = () => ToggleZenMode() },
         ];
     }
 
