@@ -80,10 +80,6 @@ public partial class ClaudeCodeStatusService : IDisposable
                 }
             }
 
-            // Track output for hybrid working detection
-            // Large output = Claude generating text/thinking (not just TUI redraw)
-            if (state.HasClaudeCode && data.Length > 100)
-                state.LastBigOutputTime = DateTime.UtcNow;
         };
     }
 
@@ -141,18 +137,11 @@ public partial class ClaudeCodeStatusService : IDisposable
             var folderName = Path.GetFileName(cwd.TrimEnd('/', '\\'));
             if (string.IsNullOrEmpty(folderName)) continue;
 
-            // Hybrid detection: hooks + output activity
-            var bigOutputAge = (DateTime.UtcNow - state.LastBigOutputTime).TotalSeconds;
-            var hasRecentOutput = bigOutputAge < 5;
-
             if (statusByFolder.TryGetValue(folderName, out var hookStatus))
             {
-                // If hook says "waiting" but we see heavy output → override to working
-                // This covers the "thinking" phase before any tool use
                 var newStatus = hookStatus switch
                 {
                     "working" => ClaudeStatus.Working,
-                    "waiting" when hasRecentOutput => ClaudeStatus.Working,
                     "waiting" => ClaudeStatus.WaitingForInput,
                     _ => ClaudeStatus.Idle
                 };
@@ -189,6 +178,5 @@ public partial class ClaudeCodeStatusService : IDisposable
         public bool HasClaudeCode { get; set; }
         public string? SessionId { get; set; }
         public string? FallbackCwd { get; set; }
-        public DateTime LastBigOutputTime { get; set; } = DateTime.MinValue;
     }
 }
