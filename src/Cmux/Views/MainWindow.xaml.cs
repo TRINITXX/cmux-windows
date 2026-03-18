@@ -706,16 +706,21 @@ public partial class MainWindow : Window
 
     private void ToolbarPowerShell_Click(object sender, RoutedEventArgs e)
     {
-        var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
-        if (surface == null) return;
-        surface.SplitRight();
+        var ws = ViewModel.SelectedWorkspace;
+        if (ws == null) return;
+        ws.CreateNewSurface();
+        if (ws.SelectedSurface != null)
+            ws.SelectedSurface.Name = "PowerShell";
     }
 
     private void ToolbarSshMac_Click(object sender, RoutedEventArgs e)
     {
-        var surface = ViewModel.SelectedWorkspace?.SelectedSurface;
+        var ws = ViewModel.SelectedWorkspace;
+        if (ws == null) return;
+        ws.CreateNewSurface();
+        var surface = ws.SelectedSurface;
         if (surface == null) return;
-        surface.SplitRight();
+        surface.Name = "SSH macOS";
 
         _ = Task.Run(async () =>
         {
