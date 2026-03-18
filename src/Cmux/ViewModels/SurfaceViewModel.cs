@@ -84,7 +84,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                         .ToList();
                 }
 
-                StartSession(leaf.PaneId, snapshot?.WorkingDirectory, snapshot);
+                StartSession(leaf.PaneId, snapshot?.WorkingDirectory ?? Surface.WorkingDirectory, snapshot);
             }
         }
 

@@ -87,6 +87,7 @@ public partial class WorkspaceViewModel : ObservableObject, IDisposable
     public void CreateNewSurface()
     {
         var surface = new Surface { Name = $"Terminal {Surfaces.Count + 1}" };
+        surface.WorkingDirectory = WorkingDirectory ?? Workspace.WorkingDirectory;
         Workspace.Surfaces.Add(surface);
 
         var surfaceVm = new SurfaceViewModel(surface, Workspace.Id, _notificationService);
