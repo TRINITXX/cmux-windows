@@ -100,6 +100,11 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
     private void RelaunchClaudeCodePanes()
     {
+        // Only relaunch if daemon is NOT connected (= fresh start, PC reboot, daemon was killed)
+        // When daemon IS connected, sessions are already alive — no need to relaunch
+        var daemonReady = App.DaemonConnectTask.IsCompletedSuccessfully && App.DaemonConnectTask.Result;
+        if (daemonReady && App.DaemonClient.IsConnected) return;
+
         var claudePanes = new List<string>();
         foreach (var leaf in RootNode.GetLeaves())
         {
@@ -116,7 +121,7 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         _ = Task.Run(async () =>
         {
             // Wait for sessions to initialize
-            await Task.Delay(2000);
+            await Task.Delay(3000);
             foreach (var paneId in claudePanes)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
