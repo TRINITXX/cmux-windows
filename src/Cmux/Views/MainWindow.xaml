@@ -408,7 +408,7 @@
                 </Border>
 
                 <!-- Vertical divider -->
-                <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Width="6" Background="Transparent"
+                <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Width="10" Background="Transparent"
                               HorizontalAlignment="Stretch" Cursor="SizeWE">
                     <GridSplitter.Template>
                         <ControlTemplate TargetType="GridSplitter">
