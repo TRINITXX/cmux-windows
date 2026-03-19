@@ -34,6 +34,8 @@ public class TerminalControl : FrameworkElement
     private int _rows;
     private bool _mouseDown;
     private int _scrollOffset; // Negative = scrolled into history, 0 = at bottom
+    private int _scrollWheelRemainder; // Fractional wheel accumulator (WezTerm-style)
+    private const double HorizontalPadding = 20; // Left/right content margin in pixels
     private bool _followOutput = true;
     private int _lastScrollbackCount;
     private int _renderQueued;
@@ -47,6 +49,7 @@ public class TerminalControl : FrameworkElement
     // Visual bell
     private DateTime _bellFlashUntil;
     private System.Windows.Threading.DispatcherTimer? _bellTimer;
+
 
     // URL detection
     private (int row, int startCol, int endCol, string url)? _hoveredUrl;
@@ -318,7 +321,7 @@ public class TerminalControl : FrameworkElement
     {
         if (ActualWidth <= 0 || ActualHeight <= 0 || _cellWidth <= 0 || _cellHeight <= 0) return;
 
-        int cols = Math.Max(1, (int)(ActualWidth / _cellWidth));
+        int cols = Math.Max(1, (int)((ActualWidth - 2 * HorizontalPadding) / _cellWidth));
         int rows = Math.Max(1, (int)(ActualHeight / _cellHeight));
 
         if (cols != _cols || rows != _rows)
@@ -381,12 +384,6 @@ public class TerminalControl : FrameworkElement
             var bgColor = ToWpfColor(_theme.Background);
             dc.DrawRectangle(GetCachedBrush(bgColor), null, new Rect(0, 0, ActualWidth, ActualHeight));
 
-            // Visual bell flash
-            if (DateTime.UtcNow < _bellFlashUntil)
-            {
-                dc.DrawRectangle(GetCachedBrush(Color.FromArgb(25, 255, 255, 255)), null,
-                    new Rect(0, 0, ActualWidth, ActualHeight));
-            }
 
             // Notification ring
             if (HasNotification)
@@ -453,7 +450,7 @@ public class TerminalControl : FrameworkElement
                         cell = TerminalCell.Empty;
                     }
 
-                    double x = c * _cellWidth;
+                    double x = HorizontalPadding + c * _cellWidth;
                     var attr = cell.Attribute;
                     bool isSelected = _selection.IsSelected(visRow, c);
                     bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse) != isSelected;
@@ -474,20 +471,22 @@ public class TerminalControl : FrameworkElement
                     if (isSelected && _theme.SelectionBackground.HasValue)
                         cellBg = _theme.SelectionBackground.Value;
 
-                    // Draw cell background
+                    // Draw cell background (ceil dimensions to prevent sub-pixel gaps between cells)
+                    double ceilW = Math.Ceiling(_cellWidth);
+                    double ceilH = Math.Ceiling(_cellHeight);
                     if (!cellBg.IsDefault)
                     {
                         dc.DrawRectangle(GetCachedBrush(ToWpfColor(cellBg)), null,
-                            new Rect(x, y, _cellWidth, _cellHeight));
+                            new Rect(x, y, ceilW, ceilH));
                     }
 
                     // Search match highlight (behind text)
                     bool isSearchMatch = searchMatchSet.Contains((visRow, c));
                     bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
                     if (isCurrentMatch)
-                        dc.DrawRectangle(currentMatchBrush, null, new Rect(x, y, _cellWidth, _cellHeight));
+                        dc.DrawRectangle(currentMatchBrush, null, new Rect(x, y, ceilW, ceilH));
                     else if (isSearchMatch)
-                        dc.DrawRectangle(searchMatchBrush, null, new Rect(x, y, _cellWidth, _cellHeight));
+                        dc.DrawRectangle(searchMatchBrush, null, new Rect(x, y, ceilW, ceilH));
 
                     // URL hover highlight
                     if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
@@ -548,7 +547,7 @@ public class TerminalControl : FrameworkElement
             // Cursor (only when viewing live buffer)
             if (!isScrolledBack && buffer.CursorVisible && IsPaneFocused && (_cursorVisible || !_cursorBlink))
             {
-                double cx = buffer.CursorCol * _cellWidth;
+                double cx = HorizontalPadding + buffer.CursorCol * _cellWidth;
                 double cy = buffer.CursorRow * _cellHeight;
                 var cursorColor = _theme.CursorColor.HasValue
                     ? ToWpfColor(_theme.CursorColor.Value)
@@ -618,7 +617,7 @@ public class TerminalControl : FrameworkElement
             brush,
             dpi);
 
-        double x = startCol * _cellWidth;
+        double x = HorizontalPadding + startCol * _cellWidth;
         dc.DrawText(text, new Point(x, y));
 
         double runWidth = _textRunBuffer.Length * _cellWidth;
@@ -1181,7 +1180,7 @@ public class TerminalControl : FrameworkElement
         if (_cols <= 0 || _rows <= 0) return;
 
         var pos = e.GetPosition(this);
-        int col = Math.Clamp((int)(pos.X / _cellWidth), 0, _cols - 1);
+        int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
         int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
 
         // Ctrl+Click for URL opening
@@ -1231,7 +1230,7 @@ public class TerminalControl : FrameworkElement
         if (_cols <= 0 || _rows <= 0) return;
 
         var pos = e.GetPosition(this);
-        int col = Math.Clamp((int)(pos.X / _cellWidth), 0, _cols - 1);
+        int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
         int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
 
         // URL detection (Ctrl held) — cache scanned URLs per row
@@ -1303,7 +1302,7 @@ public class TerminalControl : FrameworkElement
         if (IsMouseTrackingActive && _mouseDown && _cols > 0 && _rows > 0)
         {
             var pos = e.GetPosition(this);
-            int col = Math.Clamp((int)(pos.X / _cellWidth), 0, _cols - 1);
+            int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
             int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
             SendMouseReport(0, col, row, false);
         }
@@ -1324,7 +1323,7 @@ public class TerminalControl : FrameworkElement
             if (_cols <= 0 || _rows <= 0) return;
 
             var pos = e.GetPosition(this);
-            int col = Math.Clamp((int)(pos.X / _cellWidth), 0, _cols - 1);
+            int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
             int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
             SendMouseReport(2, col, row, true);
             return;
@@ -1483,7 +1482,7 @@ public class TerminalControl : FrameworkElement
             if (_cols <= 0 || _rows <= 0) return;
 
             var pos = e.GetPosition(this);
-            int col = Math.Clamp((int)(pos.X / _cellWidth), 0, _cols - 1);
+            int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
             int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
             int button = e.Delta > 0 ? 64 : 65; // 64 = scroll up, 65 = scroll down
             SendMouseReport(button, col, row, true);
@@ -1491,12 +1490,26 @@ public class TerminalControl : FrameworkElement
             return;
         }
 
-        // Scrollback navigation
-        int lines = e.Delta > 0 ? -3 : 3;
-        _scrollOffset = Math.Clamp(_scrollOffset + lines, -_session.Buffer.ScrollbackCount, 0);
-        _followOutput = _scrollOffset == 0;
-        _lastScrollbackCount = _session.Buffer.ScrollbackCount;
-        RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+        // Scrollback navigation (WezTerm-style remainder accumulation)
+        // Negate delta: WPF Delta>0 = scroll up = go into history = negative _scrollOffset
+        int scrollLines = (int)SystemParameters.WheelScrollLines;
+        int scaledDelta = -e.Delta * scrollLines;
+
+        // Reset remainder on direction change
+        if (_scrollWheelRemainder != 0 && Math.Sign(_scrollWheelRemainder) != Math.Sign(scaledDelta))
+            _scrollWheelRemainder = 0;
+
+        _scrollWheelRemainder += scaledDelta;
+        int lines = _scrollWheelRemainder / 120; // 120 = WHEEL_DELTA
+        _scrollWheelRemainder %= 120;
+
+        if (lines != 0)
+        {
+            _scrollOffset = Math.Clamp(_scrollOffset + lines, -_session.Buffer.ScrollbackCount, 0);
+            _followOutput = _scrollOffset == 0;
+            _lastScrollbackCount = _session.Buffer.ScrollbackCount;
+            RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+        }
         e.Handled = true;
     }
 
