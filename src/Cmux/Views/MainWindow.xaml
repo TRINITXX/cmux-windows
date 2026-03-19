@@ -376,6 +376,7 @@
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="BrowserSplitterColumn" Width="0" />
                         <ColumnDefinition x:Name="BrowserColumn" Width="0" />
                     </Grid.ColumnDefinitions>
 
@@ -464,8 +465,21 @@
                     </ContentControl>
 
 
+                    <!-- Browser splitter -->
+                    <GridSplitter x:Name="BrowserSplitter" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                                  Width="10" Background="Transparent" HorizontalAlignment="Stretch" Cursor="SizeWE"
+                                  Visibility="Collapsed">
+                        <GridSplitter.Template>
+                            <ControlTemplate TargetType="GridSplitter">
+                                <Grid Background="Transparent">
+                                    <Border Width="1" Background="{StaticResource BorderBrush}" HorizontalAlignment="Center" />
+                                </Grid>
+                            </ControlTemplate>
+                        </GridSplitter.Template>
+                    </GridSplitter>
+
                     <!-- Integrated browser (split right) -->
-                    <controls:BrowserControl x:Name="IntegratedBrowser" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                    <controls:BrowserControl x:Name="IntegratedBrowser" Grid.Row="0" Grid.RowSpan="2" Grid.Column="2"
                         Visibility="Collapsed" />
 
                     <!-- Command palette overlay -->

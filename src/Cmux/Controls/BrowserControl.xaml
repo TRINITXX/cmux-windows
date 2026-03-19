@@ -8,6 +8,8 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="36" />
             <RowDefinition Height="*" />
+            <RowDefinition x:Name="DevToolsSplitterRow" Height="0" />
+            <RowDefinition x:Name="DevToolsRow" Height="0" />
         </Grid.RowDefinitions>
 
         <!-- Browser toolbar -->
@@ -17,6 +19,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
@@ -44,10 +47,14 @@
                          KeyDown="AddressBar_KeyDown" />
             </Border>
 
-            <Button Grid.Column="4" Content="&#xE774;" FontFamily="Segoe MDL2 Assets"
+            <Button Grid.Column="4" Content="&#xE7B3;" FontFamily="Segoe MDL2 Assets"
+                    Style="{StaticResource CmuxButton}" Click="ToggleDevTools_Click"
+                    Width="32" Height="28" Padding="0" FontSize="12" ToolTip="Toggle DevTools (F12)"
+                    x:Name="DevToolsButton" />
+            <Button Grid.Column="5" Content="&#xE774;" FontFamily="Segoe MDL2 Assets"
                     Style="{StaticResource CmuxButton}" Click="OpenInChrome_Click"
                     Width="32" Height="28" Padding="0" FontSize="12" ToolTip="Open in Chrome" />
-            <Button Grid.Column="5" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets"
+            <Button Grid.Column="6" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets"
                     Style="{StaticResource CmuxButton}" Click="CloseBrowser_Click"
                     Width="32" Height="28" Padding="0" Margin="0,0,4,0" FontSize="10" />
         </Grid>
@@ -56,5 +63,15 @@
         <wv2:WebView2 Grid.Row="1" x:Name="WebView"
                       NavigationCompleted="WebView_NavigationCompleted"
                       SourceChanged="WebView_SourceChanged" />
+
+        <!-- DevTools splitter -->
+        <GridSplitter Grid.Row="2" x:Name="DevToolsSplitter" Height="4"
+                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                      Background="{StaticResource DividerBrush}" Cursor="SizeNS"
+                      Visibility="Collapsed" />
+
+        <!-- DevTools host (Win32 child window parented here) -->
+        <Border Grid.Row="3" x:Name="DevToolsHostBorder" Visibility="Collapsed"
+                Background="{StaticResource BackgroundBrush}" />
     </Grid>
 </UserControl>

@@ -265,6 +265,8 @@ public partial class MainWindow : Window
         IntegratedBrowser.CloseRequested += () =>
         {
             IntegratedBrowser.Visibility = Visibility.Collapsed;
+            BrowserSplitter.Visibility = Visibility.Collapsed;
+            BrowserSplitterColumn.Width = new GridLength(0);
             BrowserColumn.Width = new GridLength(0);
         };
     }
@@ -370,6 +372,14 @@ public partial class MainWindow : Window
         if (e.Key == Key.F11 && Keyboard.Modifiers == ModifierKeys.None)
         {
             ToggleZenMode();
+            e.Handled = true;
+        }
+
+        // F12: Toggle inline DevTools when browser is visible
+        if (e.Key == Key.F12 && Keyboard.Modifiers == ModifierKeys.None
+            && IntegratedBrowser.Visibility == Visibility.Visible)
+        {
+            _ = IntegratedBrowser.ToggleDevTools();
             e.Handled = true;
         }
     }
@@ -530,6 +540,8 @@ public partial class MainWindow : Window
     private void OpenIntegratedBrowser(string url)
     {
         IntegratedBrowser.Visibility = Visibility.Visible;
+        BrowserSplitterColumn.Width = new GridLength(10);
+        BrowserSplitter.Visibility = Visibility.Visible;
         BrowserColumn.Width = new GridLength(1, GridUnitType.Star);
         IntegratedBrowser.Navigate(url);
     }
@@ -539,6 +551,8 @@ public partial class MainWindow : Window
         if (IntegratedBrowser.Visibility == Visibility.Visible)
         {
             IntegratedBrowser.Visibility = Visibility.Collapsed;
+            BrowserSplitter.Visibility = Visibility.Collapsed;
+            BrowserSplitterColumn.Width = new GridLength(0);
             BrowserColumn.Width = new GridLength(0);
         }
         else
@@ -731,6 +745,7 @@ public partial class MainWindow : Window
         ws.CreateNewSurface();
         if (ws.SelectedSurface != null)
             ws.SelectedSurface.Name = "PowerShell";
+        Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void OpenNewTabWithCommand(string tabName, string command)
@@ -741,6 +756,7 @@ public partial class MainWindow : Window
         var surface = ws.SelectedSurface;
         if (surface == null) return;
         surface.Name = tabName;
+        Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
         var cwd = ws.WorkingDirectory ?? "";
         _ = Task.Run(async () =>
@@ -787,6 +803,7 @@ public partial class MainWindow : Window
         var surface = ws.SelectedSurface;
         if (surface == null) return;
         surface.Name = "SSH macOS";
+        Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
         _ = Task.Run(async () =>
         {
