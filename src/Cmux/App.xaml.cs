@@ -21,6 +21,7 @@ public partial class App : Application
     public static ClaudeCodeTitleService TitleService { get; } = new();
     public static DaemonClient DaemonClient { get; } = new();
     public static Task<bool> DaemonConnectTask { get; private set; } = Task.FromResult(false);
+    public static bool DaemonWasFreshStart { get; private set; }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern bool SetConsoleOutputCP(uint wCodePageID);
@@ -62,11 +63,13 @@ public partial class App : Application
             DaemonLog("[App] Phase 1: Quick daemon check (300ms)...");
             if (DaemonClient.TryConnect(300))
             {
-                DaemonLog("[App] Phase 1: Daemon connected!");
+                DaemonLog("[App] Phase 1: Daemon connected (existing)!");
+                DaemonWasFreshStart = false;
                 DaemonClient.RaiseConnected();
                 return true;
             }
             DaemonLog("[App] Phase 1: Daemon not available, starting daemon...");
+            DaemonWasFreshStart = true;
 
             var connected = DaemonClient.StartDaemonAndConnect();
             DaemonLog(connected

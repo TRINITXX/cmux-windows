@@ -113,10 +113,9 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                 FocusedPaneId = firstLeaf.PaneId;
         }
 
-        // DISABLED: auto-relaunch caused phantom prompts in already-running sessions.
-        // The daemon keeps sessions alive across normal close/reopen.
-        // For a PC reboot, the user can manually relaunch Claude Code.
-        // RelaunchClaudeCodePanes();
+        // Only relaunch Claude Code panes after a fresh daemon start (PC reboot).
+        // If daemon was already running (normal close/reopen), sessions are still alive.
+        RelaunchClaudeCodePanes();
     }
 
     private void RelaunchClaudeCodePanes()
@@ -134,39 +133,17 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         _ = Task.Run(async () =>
         {
-            // Wait for daemon connection and sessions to fully initialize
+            // Wait for daemon connection
             try { App.DaemonConnectTask.Wait(5000); } catch { }
-            await Task.Delay(5000);
 
-            // Check multiple signals to determine if sessions are already alive
-            // 1. Daemon connected = sessions persisted
-            if (App.DaemonClient.IsConnected) return;
+            // Only relaunch if daemon was freshly started (PC reboot / daemon was dead).
+            // If we reconnected to an existing daemon, sessions are still alive.
+            if (!App.DaemonWasFreshStart) return;
 
-            // 2. Any pane already has Claude detected from output = alive
-            if (claudePanes.Any(p => App.ClaudeStatusService.GetStatus(p.paneId) != Cmux.Core.Models.ClaudeStatus.Idle))
-                return;
+            // Wait for shell prompts to be ready
+            await Task.Delay(3000);
 
-            // 3. Check if terminal buffers have content (restored session = non-empty)
-            var hasLiveContent = false;
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
-            {
-                foreach (var (paneId, _) in claudePanes)
-                {
-                    var session = GetSession(paneId);
-                    if (session?.Buffer != null)
-                    {
-                        var text = session.Buffer.ExportPlainText(maxScrollbackLines: 5);
-                        if (!string.IsNullOrWhiteSpace(text) && text.Length > 20)
-                        {
-                            hasLiveContent = true;
-                            break;
-                        }
-                    }
-                }
-            });
-            if (hasLiveContent) return;
-
-            // All checks passed — sessions are dead, relaunch Claude Code
+            // Relaunch Claude Code in each pane with --resume
             foreach (var (paneId, sessionId) in claudePanes)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
