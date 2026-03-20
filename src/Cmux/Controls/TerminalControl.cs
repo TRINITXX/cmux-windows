@@ -3,7 +3,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -38,7 +37,7 @@ public class TerminalControl : FrameworkElement
     private const double HorizontalPadding = 20; // Left/right content margin in pixels
     private bool _followOutput = true;
     private int _lastScrollbackCount;
-    private int _renderQueued;
+    private volatile bool _needsRender;
     private string _cursorStyle = "bar";
     private bool _cursorBlink = true;
 
@@ -151,6 +150,8 @@ public class TerminalControl : FrameworkElement
         ClipToBounds = true;
         Cursor = Cursors.Arrow;
         AllowDrop = true;
+        Loaded += OnControlLoaded;
+        Unloaded += OnControlUnloaded;
 
         _selection.SelectionChanged += () => RequestRender(System.Windows.Threading.DispatcherPriority.Render);
 
@@ -189,7 +190,7 @@ public class TerminalControl : FrameworkElement
         _session.Redraw += OnRedraw;
         _session.BellReceived += OnBell;
         CalculateTerminalSize();
-        Render();
+        _needsRender = true;
     }
 
     private void OnRedraw()
@@ -287,17 +288,25 @@ public class TerminalControl : FrameworkElement
 
     private void RequestRender(System.Windows.Threading.DispatcherPriority priority = System.Windows.Threading.DispatcherPriority.Background)
     {
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-            return;
+        _needsRender = true;
+    }
 
-        if (Interlocked.Exchange(ref _renderQueued, 1) == 1)
-            return;
+    private void OnControlLoaded(object sender, RoutedEventArgs e)
+    {
+        CompositionTarget.Rendering -= OnCompositionTargetRendering;
+        CompositionTarget.Rendering += OnCompositionTargetRendering;
+    }
 
-        Dispatcher.BeginInvoke(() =>
-        {
-            Interlocked.Exchange(ref _renderQueued, 0);
-            Render();
-        }, priority);
+    private void OnControlUnloaded(object sender, RoutedEventArgs e)
+    {
+        CompositionTarget.Rendering -= OnCompositionTargetRendering;
+    }
+
+    private void OnCompositionTargetRendering(object? sender, EventArgs e)
+    {
+        if (!_needsRender) return;
+        _needsRender = false;
+        Render();
     }
 
     // --- Layout ---
@@ -588,6 +597,34 @@ public class TerminalControl : FrameworkElement
                     GetCachedBrush(Color.FromArgb(200, 0x14, 0x14, 0x14)), null,
                     new Rect(ix, 6, iw, ih), 4, 4);
                 dc.DrawText(indicatorText, new Point(ix + 6, 8));
+            }
+
+            // Scrollbar (right edge) — visible when there is scrollback content
+            if (scrollbackCount > 0)
+            {
+                const double scrollbarWidth = 6;
+                const double scrollbarMargin = 2;
+                double trackHeight = ActualHeight;
+                double trackX = ActualWidth - scrollbarWidth - scrollbarMargin;
+
+                // Track (subtle background)
+                dc.DrawRoundedRectangle(
+                    GetCachedBrush(Color.FromArgb(30, 0xFF, 0xFF, 0xFF)), null,
+                    new Rect(trackX, 0, scrollbarWidth, trackHeight), 3, 3);
+
+                // Thumb — represents the visible viewport within total lines
+                int totalLines = scrollbackCount + _rows;
+                double thumbRatio = (double)_rows / totalLines;
+                double thumbHeight = Math.Max(20, trackHeight * thumbRatio);
+                // viewStartLine goes from 0 (top of scrollback) to scrollbackCount (live bottom)
+                double scrollFraction = (double)viewStartLine / Math.Max(1, totalLines - _rows);
+                double thumbY = scrollFraction * (trackHeight - thumbHeight);
+
+                var thumbBrush = isScrolledBack
+                    ? GetCachedBrush(Color.FromArgb(120, 0x81, 0x8C, 0xF8))
+                    : GetCachedBrush(Color.FromArgb(60, 0xFF, 0xFF, 0xFF));
+                dc.DrawRoundedRectangle(thumbBrush, null,
+                    new Rect(trackX, thumbY, scrollbarWidth, thumbHeight), 3, 3);
             }
         }
         catch (Exception ex)
