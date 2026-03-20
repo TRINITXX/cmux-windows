@@ -37,11 +37,13 @@ CompositionTarget.Rendering → if (_needsRender) { _needsRender = false; Render
 - `TerminalControl.cs`: Replace `_renderQueued` + `Dispatcher.BeginInvoke` with `_needsRender` flag + `CompositionTarget.Rendering` handler
 - `TerminalSession.cs`: `Redraw?.Invoke()` stays — the handler in TerminalControl just sets a flag
 
-### 2. Row-Level Dirty Tracking
+### 2. Row-Level Dirty Tracking with Cached Drawing
 
 **Current:** `TerminalCell.IsDirty` exists per cell but is never read by the renderer. Every frame iterates all rows×cols.
 
-**New:** Track dirty rows at the buffer level. The renderer skips clean rows.
+**Constraint:** `DrawingVisual.RenderOpen()` clears all previous drawing content. We cannot "skip" a row and expect the previous frame's content to remain. Every row must be drawn every frame.
+
+**New:** Track dirty rows at the buffer level. Cache per-row render data (GlyphRuns + background rects). Dirty rows rebuild their cache; clean rows replay from cache.
 
 Add to `TerminalBuffer`:
 
@@ -55,21 +57,36 @@ public void MarkAllDirty() { _allDirty = true; }
 public void ClearDirtyFlags() { _allDirty = false; Array.Clear(_dirtyRows); }
 ```
 
-Mark rows dirty in: `SetChar()`, `InsertLine()`, `DeleteLine()`, `ScrollUp()`, `ScrollDown()`, `Clear()`, `EraseLine()`, `EraseDisplay()`, `RestoreSnapshot()`.
+`_dirtyRows` must be reallocated in `Resize()` with `_allDirty = true`.
+
+Mark rows dirty in: `SetChar()`, `WriteChar()`, `WriteString()`, `InsertLine()`, `DeleteLine()`, `ScrollUp()`, `ScrollDown()`, `Clear()`, `EraseLine()`, `EraseDisplay()`, `EraseChars()`, `InsertChars()`, `DeleteChars()`, `RestoreSnapshot()`, `SwitchToAlternateScreen()`, `SwitchToMainScreen()`, `Resize()`.
+
+Add per-row cache in `TerminalControl`:
+
+```csharp
+private struct CachedRow
+{
+    public List<(GlyphRun Run, Brush Brush)> GlyphRuns;
+    public List<(Rect Rect, Brush Brush)> Backgrounds;
+    public List<(Point From, Point To, Pen Pen)> Decorations; // underline, strikethrough
+}
+private CachedRow[] _rowCache;
+```
 
 In `Render()`:
 
-- When rendering live buffer rows (not scrollback): skip rows where `!buffer.IsRowDirty(bufferRow)`
+- For each visible row: if dirty (or no cache), rebuild GlyphRuns/backgrounds into `_rowCache[visRow]`
+- For clean rows: replay `_rowCache[visRow]` directly via `dc.DrawGlyphRun()` / `dc.DrawRectangle()`
 - After render: `buffer.ClearDirtyFlags()`
-- Scrollback rows: always render when viewport moves (scroll offset changed), skip otherwise
-- Selection, search highlights, cursor: force dirty on affected rows
+- Viewport movement (scroll): invalidate all rows (`_allDirty`)
+- Selection/search/cursor changes: invalidate affected visible rows in the cache
 
-**Scrollback consideration:** Scrollback lines are immutable once pushed. When the user scrolls through history, we need a full repaint (viewport changed), but when output is streaming and the user is at the bottom, only the active buffer rows change.
+**Thread safety:** `Render()` reads the buffer on the UI thread while the read thread writes under `_lock`. The render must acquire the same lock for the duration of dirty-check + cell reads. The lock is held for <1ms at 60fps with dirty-row skipping, so contention is negligible.
 
 Add `_lastViewStartLine` to detect viewport movement:
 
 ```csharp
-if (viewStartLine != _lastViewStartLine) buffer.MarkAllDirty();
+if (viewStartLine != _lastViewStartLine) { _allDirty = true; }
 _lastViewStartLine = viewStartLine;
 ```
 
@@ -87,17 +104,29 @@ private GlyphTypeface _glyphTypefaceBold;    // bold
 private GlyphTypeface _glyphTypefaceItalic;  // italic
 private GlyphTypeface _glyphTypefaceBoldItalic;
 
-// Glyph index cache: char → glyph index (per typeface)
-private Dictionary<char, ushort> _glyphMap;
-private Dictionary<char, ushort> _glyphMapBold;
-// ... etc
+// Lazy glyph index cache: char → glyph index (populated on first use)
+private readonly Dictionary<int, ushort> _glyphCache = new();
+private readonly Dictionary<int, ushort> _glyphCacheBold = new();
+// ... per typeface variant
 
 private void InitGlyphTypefaces()
 {
     _typeface.TryGetGlyphTypeface(out _glyphTypeface);
-    // Build glyph map from CharacterToGlyphMap
-    _glyphMap = new Dictionary<char, ushort>(_glyphTypeface.CharacterToGlyphMap);
-    // Repeat for bold, italic, bold+italic
+    // Note: GlyphTypeface.CharacterToGlyphMap is IDictionary<int, ushort>
+    // NOT Dictionary<char, ushort>. Use int keys (codepoints).
+    // Lazy cache — don't copy the full 30k+ map, populate on miss.
+    _glyphCache.Clear();
+}
+
+private ushort GetGlyphIndex(GlyphTypeface gt, Dictionary<int, ushort> cache, int codepoint)
+{
+    if (cache.TryGetValue(codepoint, out var idx)) return idx;
+    if (gt.CharacterToGlyphMap.TryGetValue(codepoint, out idx))
+    {
+        cache[codepoint] = idx;
+        return idx;
+    }
+    return 0; // .notdef — signals missing glyph
 }
 ```
 
@@ -105,74 +134,92 @@ private void InitGlyphTypefaces()
 
 ```csharp
 private void FlushGlyphRun(DrawingContext dc, double dpi, double y, int startCol,
-    Color fgColor, bool bold, bool italic, bool dim, bool underline, bool strikethrough)
+    Color fgColor, bool bold, bool italic, bool dim, bool underline, bool strikethrough,
+    ReadOnlySpan<(char Char, int Width)> cells)
 {
-    var str = _textRunBuffer.ToString();
-    if (str.Length == 0) return;
+    if (cells.Length == 0) return;
 
     var gt = GetGlyphTypeface(bold, italic);
-    var map = GetGlyphMap(bold, italic);
-    var fallbackIndex = gt.CharacterToGlyphMap.GetValueOrDefault('?', (ushort)0);
+    var cache = GetGlyphCache(bold, italic);
 
-    var glyphIndices = new ushort[str.Length];
-    var advanceWidths = new double[str.Length];
-
-    for (int i = 0; i < str.Length; i++)
+    // Split runs at missing-glyph boundaries to avoid full-run FormattedText fallback
+    int runStart = 0;
+    while (runStart < cells.Length)
     {
-        glyphIndices[i] = map.GetValueOrDefault(str[i], fallbackIndex);
-        advanceWidths[i] = _cellWidth; // FIXED width — eliminates misalignment
+        // Find contiguous segment of known glyphs
+        int runEnd = runStart;
+        bool hasMissing = false;
+        while (runEnd < cells.Length)
+        {
+            var idx = GetGlyphIndex(gt, cache, cells[runEnd].Char);
+            if (idx == 0 && cells[runEnd].Char != ' ') { hasMissing = true; break; }
+            runEnd++;
+        }
+
+        // Render known-glyph segment with GlyphRun
+        if (runEnd > runStart)
+            EmitGlyphRun(dc, dpi, y, startCol, gt, cache, cells[runStart..runEnd], fgColor, dim);
+
+        startCol += CountColumns(cells[runStart..runEnd]);
+
+        // Render missing-glyph character(s) with FormattedText fallback (constrained to cellWidth)
+        if (hasMissing && runEnd < cells.Length)
+        {
+            EmitFallbackChar(dc, dpi, y, startCol, cells[runEnd], fgColor, bold, italic, dim);
+            startCol += cells[runEnd].Width;
+            runEnd++;
+        }
+        runStart = runEnd;
+    }
+
+    // Decorations
+    double totalWidth = CountColumns(cells) * _cellWidth;
+    double x = HorizontalPadding + startCol * _cellWidth;
+    if (underline) { /* cached pen */ }
+    if (strikethrough) { /* cached pen */ }
+}
+
+private void EmitGlyphRun(DrawingContext dc, double dpi, double y, int startCol,
+    GlyphTypeface gt, Dictionary<int, ushort> cache,
+    ReadOnlySpan<(char Char, int Width)> cells, Color fgColor, bool dim)
+{
+    var glyphIndices = new ushort[cells.Length];
+    var advanceWidths = new double[cells.Length];
+
+    for (int i = 0; i < cells.Length; i++)
+    {
+        glyphIndices[i] = GetGlyphIndex(gt, cache, cells[i].Char);
+        advanceWidths[i] = cells[i].Width * _cellWidth; // Width=2 for CJK wide chars
     }
 
     double x = HorizontalPadding + startCol * _cellWidth;
-    double baseline = y + _glyphTypeface.Baseline * _fontSize;
+    // Baseline: use Baseline ratio applied to fontSize, offset within cell
+    double baseline = y + gt.Baseline * _fontSize;
 
     var glyphRun = new GlyphRun(
-        glyphTypeface: gt,
-        bidiLevel: 0,
-        isSideways: false,
-        renderingEmSize: _fontSize,
-        pixelsPerDip: (float)dpi,
-        glyphIndices: glyphIndices,
-        baselineOrigin: new Point(x, baseline),
-        advanceWidths: advanceWidths,
-        glyphOffsets: null,
-        characters: null,
-        deviceFontName: null,
-        clusterMap: null,
-        caretStops: null,
-        language: null);
+        glyphTypeface: gt, bidiLevel: 0, isSideways: false,
+        renderingEmSize: _fontSize, pixelsPerDip: (float)dpi,
+        glyphIndices: glyphIndices, baselineOrigin: new Point(x, baseline),
+        advanceWidths: advanceWidths, glyphOffsets: null, characters: null,
+        deviceFontName: null, clusterMap: null, caretStops: null, language: null);
 
     var brush = dim
         ? GetCachedBrush(Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B))
         : GetCachedBrush(fgColor);
-
     dc.DrawGlyphRun(brush, glyphRun);
-
-    // Decorations (unchanged)
-    double runWidth = str.Length * _cellWidth;
-    if (underline) { /* same pen drawing */ }
-    if (strikethrough) { /* same pen drawing */ }
 }
 ```
 
-**Key advantage:** `advanceWidths[i] = _cellWidth` forces every character to exactly one cell width. No more misalignment from proportional spacing.
+**Key advantages:**
 
-#### Fallback for missing glyphs:
+- `advanceWidths[i] = cells[i].Width * _cellWidth` — fixes misalignment and supports wide CJK chars
+- Missing glyphs are isolated to single-char FormattedText fallbacks, not entire runs
+- Lazy glyph cache: only caches the ~200 chars actually used, not the full 30k+ font map
+- `GlyphTypeface.CharacterToGlyphMap` is `IDictionary<int, ushort>` — correctly typed
 
-Characters not in the primary font's `CharacterToGlyphMap` (emoji, rare Unicode) fall back to `FormattedText` for that specific run only. This is rare and doesn't affect performance for normal terminal output.
+#### Baseline verification:
 
-```csharp
-bool hasMissingGlyph = false;
-for (int i = 0; i < str.Length; i++)
-{
-    if (!map.ContainsKey(str[i])) { hasMissingGlyph = true; break; }
-}
-if (hasMissingGlyph)
-{
-    FlushTextRunFallback(dc, dpi, y, startCol, ...); // old FormattedText path
-    return;
-}
-```
+`GlyphTypeface.Baseline` is the distance from top of em-square to baseline, as a fraction of em-size. So `baseline * fontSize` gives the pixel offset from cell top to text baseline. This is correct when `_cellHeight >= _fontSize`. If `_cellHeight > _fontSize` (line spacing), text will be top-aligned within the cell, which matches the current FormattedText behavior. No adjustment needed.
 
 ### 4. Background Rectangle Batching
 
@@ -205,6 +252,12 @@ This reduces draw calls from potentially 120 per row to ~3-5.
 
 The renderer already uses `buffer.CellAt(row, col)` which returns `ref TerminalCell` — no allocation. This is fine. No change needed for live buffer access.
 
+### 6. Lifecycle Management
+
+- Subscribe to `CompositionTarget.Rendering` in the constructor or `OnLoaded`
+- Unsubscribe in `Dispose()` / when detached from visual tree — `CompositionTarget.Rendering` is a static event, failing to unsubscribe leaks the control
+- Cache Pen objects for URL hover, notification ring, focus indicator alongside the brush cache (avoid per-frame `new Pen()`)
+
 ## Architecture Summary
 
 ```
@@ -214,19 +267,21 @@ Output arrives (4KB chunks)
   │   ├─ Parser processes VT sequences → TerminalBuffer
   │   │   └─ SetChar/Scroll/etc mark affected rows dirty
   │   └─ Redraw?.Invoke() → TerminalControl.OnRedraw()
-  │       └─ _needsRender = true  (atomic, no dispatch)
+  │       └─ _needsRender = true  (volatile flag, no dispatch)
   │
   └─ CompositionTarget.Rendering (vsync, ~60fps)
       └─ if (_needsRender) Render()
+          ├─ Acquire buffer lock
           ├─ Draw background (full rect)
           ├─ For each visible row:
-          │   ├─ Skip if !dirty && viewport hasn't moved
+          │   ├─ If dirty: rebuild row cache (GlyphRuns + bg rects)
+          │   ├─ If clean: replay row cache
           │   ├─ Batch background rects (merge same-color)
           │   └─ Batch text into GlyphRun (same style)
-          │       └─ Fixed advanceWidths = _cellWidth
-          ├─ Draw cursor
-          ├─ Draw scrollbar
-          └─ buffer.ClearDirtyFlags()
+          │       └─ advanceWidths = cell.Width * _cellWidth
+          ├─ Draw cursor, scrollbar
+          ├─ buffer.ClearDirtyFlags()
+          └─ Release buffer lock
 ```
 
 ## Files to Modify
