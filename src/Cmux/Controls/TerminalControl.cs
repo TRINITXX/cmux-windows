@@ -66,6 +66,7 @@ public class TerminalControl : FrameworkElement
 
     // Rendering caches to avoid per-frame allocations
     private readonly Dictionary<Color, SolidColorBrush> _brushCache = [];
+    private readonly Dictionary<Color, Pen> _penCache = new();
     private Typeface? _typefaceBold;
     private Typeface? _typefaceItalic;
     private Typeface? _typefaceBoldItalic;
@@ -385,9 +386,19 @@ public class TerminalControl : FrameworkElement
         return brush;
     }
 
+    private Pen GetCachedPen(Color color, double thickness = 1)
+    {
+        if (_penCache.TryGetValue(color, out var pen)) return pen;
+        pen = new Pen(GetCachedBrush(color), thickness);
+        pen.Freeze();
+        _penCache[color] = pen;
+        return pen;
+    }
+
     private void InvalidateRenderCaches()
     {
         _brushCache.Clear();
+        _penCache.Clear();
         _typefaceBold = null;
         _typefaceItalic = null;
         _typefaceBoldItalic = null;
@@ -475,17 +486,13 @@ public class TerminalControl : FrameworkElement
             // Notification ring
             if (HasNotification)
             {
-                var notifPen = new Pen(GetCachedBrush(Color.FromArgb(180, 0x63, 0x66, 0xF1)), 2);
-                notifPen.Freeze();
-                dc.DrawRoundedRectangle(null, notifPen, new Rect(1, 1, ActualWidth - 2, ActualHeight - 2), 4, 4);
+                dc.DrawRoundedRectangle(null, GetCachedPen(Color.FromArgb(180, 0x63, 0x66, 0xF1), 2), new Rect(1, 1, ActualWidth - 2, ActualHeight - 2), 4, 4);
             }
 
             // Focused pane indicator
             if (IsPaneFocused)
             {
-                var focusPen = new Pen(GetCachedBrush(Color.FromArgb(50, 0x81, 0x8C, 0xF8)), 1);
-                focusPen.Freeze();
-                dc.DrawRectangle(null, focusPen, new Rect(0, 0, ActualWidth, ActualHeight));
+                dc.DrawRectangle(null, GetCachedPen(Color.FromArgb(50, 0x81, 0x8C, 0xF8)), new Rect(0, 0, ActualWidth, ActualHeight));
             }
 
             // Calculate scrollback offset
@@ -670,6 +677,11 @@ public class TerminalControl : FrameworkElement
         bool runUnderline = false, runStrikethrough = false;
         _textRunBuffer.Clear();
 
+        // Background run state for batching consecutive same-color cells
+        Color currentBgColor = default;
+        double bgRunX = 0, bgRunWidth = 0;
+        bool hasBgRun = false;
+
         for (int c = 0; c < _cols; c++)
         {
             TerminalCell cell;
@@ -709,13 +721,31 @@ public class TerminalControl : FrameworkElement
             if (isSelected && _theme.SelectionBackground.HasValue)
                 cellBg = _theme.SelectionBackground.Value;
 
-            // Background rectangle (ceil dimensions to prevent sub-pixel gaps)
+            // Background rectangle — batch consecutive cells of the same color
+            var wpfBg = ToWpfColor(cellBg);
             if (!cellBg.IsDefault)
             {
-                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), GetCachedBrush(ToWpfColor(cellBg))));
+                if (hasBgRun && wpfBg == currentBgColor)
+                {
+                    bgRunWidth += ceilW;
+                }
+                else
+                {
+                    if (hasBgRun)
+                        cache.Backgrounds!.Add((new Rect(bgRunX, y, bgRunWidth, ceilH), GetCachedBrush(currentBgColor)));
+                    currentBgColor = wpfBg;
+                    bgRunX = x;
+                    bgRunWidth = ceilW;
+                    hasBgRun = true;
+                }
+            }
+            else if (hasBgRun)
+            {
+                cache.Backgrounds!.Add((new Rect(bgRunX, y, bgRunWidth, ceilH), GetCachedBrush(currentBgColor)));
+                hasBgRun = false;
             }
 
-            // Search match highlight (behind text)
+            // Search match highlight (behind text) — added as separate overlays
             bool isSearchMatch = searchMatchSet.Contains((visRow, c));
             bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
             if (isCurrentMatch)
@@ -726,9 +756,7 @@ public class TerminalControl : FrameworkElement
             // URL hover highlight
             if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
             {
-                var urlPen = new Pen(GetCachedBrush(Color.FromRgb(0x81, 0x8C, 0xF8)), 1);
-                urlPen.Freeze();
-                cache.Decorations.Add((new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1), urlPen));
+                cache.Decorations.Add((new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1), GetCachedPen(Color.FromRgb(0x81, 0x8C, 0xF8))));
             }
 
             // Text batching: group consecutive characters with same visual style
@@ -774,7 +802,11 @@ public class TerminalControl : FrameworkElement
             }
         }
 
-        // Flush final run for this row
+        // Flush final background run
+        if (hasBgRun)
+            cache.Backgrounds!.Add((new Rect(bgRunX, y, bgRunWidth, ceilH), GetCachedBrush(currentBgColor)));
+
+        // Flush final text run for this row
         if (runStartCol >= 0)
             FlushGlyphRun(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
     }
@@ -826,9 +858,8 @@ public class TerminalControl : FrameworkElement
             caretStops: null,
             language: null);
 
-        var brush = dim
-            ? GetCachedBrush(Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B))
-            : GetCachedBrush(fgColor);
+        var effectiveFgColor = dim ? Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B) : fgColor;
+        var brush = GetCachedBrush(effectiveFgColor);
 
         cache.GlyphRuns!.Add((glyphRun, brush));
 
@@ -836,16 +867,12 @@ public class TerminalControl : FrameworkElement
 
         if (underline)
         {
-            var pen = new Pen(brush, 1);
-            pen.Freeze();
-            cache.Decorations!.Add((new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1), pen));
+            cache.Decorations!.Add((new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1), GetCachedPen(effectiveFgColor)));
         }
 
         if (strikethrough)
         {
-            var pen = new Pen(brush, 1);
-            pen.Freeze();
-            cache.Decorations!.Add((new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2), pen));
+            cache.Decorations!.Add((new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2), GetCachedPen(effectiveFgColor)));
         }
     }
 
@@ -878,6 +905,11 @@ public class TerminalControl : FrameworkElement
         bool runBold = false, runItalic = false, runDim = false;
         bool runUnderline = false, runStrikethrough = false;
         _textRunBuffer.Clear();
+
+        // Background run state for batching consecutive same-color cells
+        Color currentBgColor = default;
+        double bgRunX = 0, bgRunWidth = 0;
+        bool hasBgRun = false;
 
         for (int c = 0; c < _cols; c++)
         {
@@ -918,13 +950,31 @@ public class TerminalControl : FrameworkElement
             if (isSelected && _theme.SelectionBackground.HasValue)
                 cellBg = _theme.SelectionBackground.Value;
 
-            // Background rectangle
+            // Background rectangle — batch consecutive cells of the same color
+            var wpfBg = ToWpfColor(cellBg);
             if (!cellBg.IsDefault)
             {
-                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), GetCachedBrush(ToWpfColor(cellBg))));
+                if (hasBgRun && wpfBg == currentBgColor)
+                {
+                    bgRunWidth += ceilW;
+                }
+                else
+                {
+                    if (hasBgRun)
+                        cache.Backgrounds!.Add((new Rect(bgRunX, y, bgRunWidth, ceilH), GetCachedBrush(currentBgColor)));
+                    currentBgColor = wpfBg;
+                    bgRunX = x;
+                    bgRunWidth = ceilW;
+                    hasBgRun = true;
+                }
+            }
+            else if (hasBgRun)
+            {
+                cache.Backgrounds!.Add((new Rect(bgRunX, y, bgRunWidth, ceilH), GetCachedBrush(currentBgColor)));
+                hasBgRun = false;
             }
 
-            // Search match highlight
+            // Search match highlight — added as separate overlays
             bool isSearchMatch = searchMatchSet.Contains((visRow, c));
             bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
             if (isCurrentMatch)
@@ -935,9 +985,7 @@ public class TerminalControl : FrameworkElement
             // URL hover highlight
             if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
             {
-                var urlPen = new Pen(GetCachedBrush(Color.FromRgb(0x81, 0x8C, 0xF8)), 1);
-                urlPen.Freeze();
-                cache.Decorations.Add((new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1), urlPen));
+                cache.Decorations.Add((new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1), GetCachedPen(Color.FromRgb(0x81, 0x8C, 0xF8))));
             }
 
             // Text batching
@@ -980,6 +1028,10 @@ public class TerminalControl : FrameworkElement
             }
         }
 
+        // Flush final background run
+        if (hasBgRun)
+            cache.Backgrounds!.Add((new Rect(bgRunX, y, bgRunWidth, ceilH), GetCachedBrush(currentBgColor)));
+
         if (runStartCol >= 0)
             FlushTextRunToCache(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
     }
@@ -993,9 +1045,8 @@ public class TerminalControl : FrameworkElement
     {
         if (_textRunBuffer.Length == 0) return;
 
-        var brush = dim
-            ? GetCachedBrush(Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B))
-            : GetCachedBrush(fgColor);
+        var effectiveFgColor = dim ? Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B) : fgColor;
+        var brush = GetCachedBrush(effectiveFgColor);
         var tf = GetTypeface(bold, italic);
         var text = new FormattedText(
             _textRunBuffer.ToString(),
@@ -1046,16 +1097,12 @@ public class TerminalControl : FrameworkElement
 
         if (underline)
         {
-            var pen = new Pen(brush, 1);
-            pen.Freeze();
-            cache.Decorations!.Add((new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1), pen));
+            cache.Decorations!.Add((new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1), GetCachedPen(effectiveFgColor)));
         }
 
         if (strikethrough)
         {
-            var pen = new Pen(brush, 1);
-            pen.Freeze();
-            cache.Decorations!.Add((new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2), pen));
+            cache.Decorations!.Add((new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2), GetCachedPen(effectiveFgColor)));
         }
     }
 
