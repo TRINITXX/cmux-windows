@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -826,61 +827,66 @@ public class TerminalControl : FrameworkElement
     private void FlushGlyphRun(DrawingContext dc, double dpi, double y, int startCol,
         Color fgColor, bool bold, bool italic, bool dim, bool underline, bool strikethrough)
     {
-        if (_textRunBuffer.Length == 0) return;
+        int len = _textRunBuffer.Length;
+        if (len == 0) return;
 
         var gt = ResolveGlyphTypeface(bold, italic);
-        if (gt == null) return; // should not happen since caller checks _glyphTypeface != null
+        if (gt == null) return;
 
         var glyphCacheMap = ResolveGlyphCache(bold, italic);
-        var str = _textRunBuffer.ToString();
         var fallbackIdx = LookupGlyph(gt, glyphCacheMap, '?');
 
-        var glyphIndices = new ushort[str.Length];
-        var advanceWidths = new double[str.Length];
+        // Zero-allocation: rent from pool instead of new[]
+        var glyphIndices = ArrayPool<ushort>.Shared.Rent(len);
+        var advanceWidths = ArrayPool<double>.Shared.Rent(len);
 
-        for (int i = 0; i < str.Length; i++)
+        try
         {
-            var idx = LookupGlyph(gt, glyphCacheMap, str[i]);
-            if (idx == 0 && str[i] != ' ' && str[i] != '\0')
-                idx = fallbackIdx;
-            glyphIndices[i] = idx;
-            advanceWidths[i] = _cellWidth; // FIXED width — fixes character misalignment
+            // Build glyph indices directly from StringBuilder — no ToString() allocation
+            for (int i = 0; i < len; i++)
+            {
+                char c = _textRunBuffer[i];
+                var idx = LookupGlyph(gt, glyphCacheMap, c);
+                if (idx == 0 && c != ' ' && c != '\0')
+                    idx = fallbackIdx;
+                glyphIndices[i] = idx;
+                advanceWidths[i] = _cellWidth;
+            }
+
+            double x = HorizontalPadding + startCol * _cellWidth;
+            double baseline = y + gt.Baseline * _fontSize;
+
+            // GlyphRun needs exact-length collections, copy from rented arrays
+            var glyphRun = new GlyphRun(
+                glyphTypeface: gt,
+                bidiLevel: 0,
+                isSideways: false,
+                renderingEmSize: _fontSize,
+                pixelsPerDip: (float)dpi,
+                glyphIndices: new List<ushort>(glyphIndices.AsSpan(0, len).ToArray()),
+                baselineOrigin: new Point(x, baseline),
+                advanceWidths: new List<double>(advanceWidths.AsSpan(0, len).ToArray()),
+                glyphOffsets: null,
+                characters: null,
+                deviceFontName: null,
+                clusterMap: null,
+                caretStops: null,
+                language: null);
+
+            var effectiveFgColor = dim ? Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B) : fgColor;
+            var brush = GetCachedBrush(effectiveFgColor);
+            dc.DrawGlyphRun(brush, glyphRun);
+
+            double runWidth = len * _cellWidth;
+            if (underline)
+                dc.DrawLine(GetCachedPen(effectiveFgColor), new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1));
+            if (strikethrough)
+                dc.DrawLine(GetCachedPen(effectiveFgColor), new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2));
         }
-
-        double x = HorizontalPadding + startCol * _cellWidth;
-        double baseline = y + gt.Baseline * _fontSize;
-
-        var glyphRun = new GlyphRun(
-            glyphTypeface: gt,
-            bidiLevel: 0,
-            isSideways: false,
-            renderingEmSize: _fontSize,
-            pixelsPerDip: (float)dpi,
-            glyphIndices: glyphIndices,
-            baselineOrigin: new Point(x, baseline),
-            advanceWidths: advanceWidths,
-            glyphOffsets: null,
-            characters: null,
-            deviceFontName: null,
-            clusterMap: null,
-            caretStops: null,
-            language: null);
-
-        var effectiveFgColor = dim ? Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B) : fgColor;
-        var brush = GetCachedBrush(effectiveFgColor);
-
-        dc.DrawGlyphRun(brush, glyphRun);
-
-        double runWidth = str.Length * _cellWidth;
-
-        if (underline)
+        finally
         {
-            dc.DrawLine(GetCachedPen(effectiveFgColor), new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1));
-        }
-
-        if (strikethrough)
-        {
-            dc.DrawLine(GetCachedPen(effectiveFgColor), new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2));
+            ArrayPool<ushort>.Shared.Return(glyphIndices);
+            ArrayPool<double>.Shared.Return(advanceWidths);
         }
     }
 
@@ -902,34 +908,42 @@ public class TerminalControl : FrameworkElement
         // Try to build a GlyphRun from the typeface for consistent rendering
         if (tf.TryGetGlyphTypeface(out var gt))
         {
-            var str = _textRunBuffer.ToString();
-            var glyphIndices = new ushort[str.Length];
-            var advanceWidths = new double[str.Length];
+            int len = _textRunBuffer.Length;
+            var glyphIndices = ArrayPool<ushort>.Shared.Rent(len);
+            var advanceWidths = ArrayPool<double>.Shared.Rent(len);
 
-            for (int i = 0; i < str.Length; i++)
+            try
             {
-                gt.CharacterToGlyphMap.TryGetValue(str[i], out var idx);
-                glyphIndices[i] = idx;
-                advanceWidths[i] = _cellWidth;
+                for (int i = 0; i < len; i++)
+                {
+                    gt.CharacterToGlyphMap.TryGetValue(_textRunBuffer[i], out var idx);
+                    glyphIndices[i] = idx;
+                    advanceWidths[i] = _cellWidth;
+                }
+
+                var glyphRun = new GlyphRun(
+                    glyphTypeface: gt,
+                    bidiLevel: 0,
+                    isSideways: false,
+                    renderingEmSize: _fontSize,
+                    pixelsPerDip: (float)dpi,
+                    glyphIndices: new List<ushort>(glyphIndices.AsSpan(0, len).ToArray()),
+                    baselineOrigin: new Point(x, y + gt.Baseline * _fontSize),
+                    advanceWidths: new List<double>(advanceWidths.AsSpan(0, len).ToArray()),
+                    glyphOffsets: null,
+                    characters: null,
+                    deviceFontName: null,
+                    clusterMap: null,
+                    caretStops: null,
+                    language: null);
+
+                dc.DrawGlyphRun(brush, glyphRun);
             }
-
-            var glyphRun = new GlyphRun(
-                glyphTypeface: gt,
-                bidiLevel: 0,
-                isSideways: false,
-                renderingEmSize: _fontSize,
-                pixelsPerDip: (float)dpi,
-                glyphIndices: glyphIndices,
-                baselineOrigin: new Point(x, y + gt.Baseline * _fontSize),
-                advanceWidths: advanceWidths,
-                glyphOffsets: null,
-                characters: null,
-                deviceFontName: null,
-                clusterMap: null,
-                caretStops: null,
-                language: null);
-
-            dc.DrawGlyphRun(brush, glyphRun);
+            finally
+            {
+                ArrayPool<ushort>.Shared.Return(glyphIndices);
+                ArrayPool<double>.Shared.Return(advanceWidths);
+            }
         }
 
         double runWidth = _textRunBuffer.Length * _cellWidth;
