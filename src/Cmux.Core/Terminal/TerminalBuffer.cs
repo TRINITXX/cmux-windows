@@ -10,6 +10,8 @@ public class TerminalBuffer
     private TerminalCell[,] _cells;
     private readonly ScrollbackBuffer<TerminalCell[]> _scrollback;
     private readonly int _maxScrollback;
+    private bool[] _dirtyRows;
+    private bool _allDirty = true;
 
     public int Cols { get; private set; }
     public int Rows { get; private set; }
@@ -67,6 +69,7 @@ public class TerminalBuffer
         ScrollTop = 0;
         ScrollBottom = Rows - 1;
         _cells = new TerminalCell[Rows, Cols];
+        _dirtyRows = new bool[Rows];
         Clear();
     }
 
@@ -75,6 +78,7 @@ public class TerminalBuffer
         for (int r = 0; r < Rows; r++)
             for (int c = 0; c < Cols; c++)
                 _cells[r, c] = TerminalCell.Empty;
+        _allDirty = true;
     }
 
     public ref TerminalCell CellAt(int row, int col)
@@ -112,6 +116,7 @@ public class TerminalBuffer
             IsDirty = true,
             Width = 1,
         };
+        MarkRowDirty(row);
     }
 
     /// <summary>
@@ -146,6 +151,7 @@ public class TerminalBuffer
                 IsDirty = true,
                 Width = 1,
             };
+            MarkRowDirty(CursorRow);
         }
 
         if (CursorCol + 1 >= Cols)
@@ -229,6 +235,7 @@ public class TerminalBuffer
                 _cells[ScrollBottom, c] = TerminalCell.Empty;
         }
 
+        _allDirty = true;
         RaiseContentChanged();
     }
 
@@ -247,6 +254,7 @@ public class TerminalBuffer
                 _cells[ScrollTop, c] = TerminalCell.Empty;
         }
 
+        _allDirty = true;
         RaiseContentChanged();
     }
 
@@ -284,6 +292,7 @@ public class TerminalBuffer
                 break;
         }
 
+        _allDirty = true;
         RaiseContentChanged();
     }
 
@@ -312,6 +321,7 @@ public class TerminalBuffer
                 break;
         }
 
+        MarkRowDirty(CursorRow);
         RaiseContentChanged();
     }
 
@@ -323,6 +333,7 @@ public class TerminalBuffer
         count = Math.Max(0, count);
         for (int i = 0; i < count && CursorCol + i < Cols; i++)
             _cells[CursorRow, CursorCol + i] = TerminalCell.Empty;
+        MarkRowDirty(CursorRow);
         RaiseContentChanged();
     }
 
@@ -343,6 +354,7 @@ public class TerminalBuffer
                 _cells[CursorRow, c] = TerminalCell.Empty;
         }
         ScrollBottom = savedBottom;
+        _allDirty = true;
         RaiseContentChanged();
     }
 
@@ -360,6 +372,7 @@ public class TerminalBuffer
             for (int c = 0; c < Cols; c++)
                 _cells[ScrollBottom, c] = TerminalCell.Empty;
         }
+        _allDirty = true;
         RaiseContentChanged();
     }
 
@@ -375,6 +388,7 @@ public class TerminalBuffer
                 _cells[CursorRow, c] = _cells[CursorRow, c - 1];
             _cells[CursorRow, CursorCol] = TerminalCell.Empty;
         }
+        MarkRowDirty(CursorRow);
         RaiseContentChanged();
     }
 
@@ -390,6 +404,7 @@ public class TerminalBuffer
                 _cells[CursorRow, c] = _cells[CursorRow, c + 1];
             _cells[CursorRow, Cols - 1] = TerminalCell.Empty;
         }
+        MarkRowDirty(CursorRow);
         RaiseContentChanged();
     }
 
@@ -446,6 +461,7 @@ public class TerminalBuffer
         CurrentAttribute = TerminalAttribute.Default;
         SetScrollRegion(0, Rows - 1);
         IsAlternateScreen = true;
+        _allDirty = true;
     }
 
     /// <summary>
@@ -475,6 +491,7 @@ public class TerminalBuffer
         CurrentAttribute = _savedMainAttribute;
         SetScrollRegion(0, Rows - 1);
         IsAlternateScreen = false;
+        _allDirty = true;
 
         RaiseContentChanged();
     }
@@ -545,6 +562,8 @@ public class TerminalBuffer
         _cells = newCells;
         Cols = newCols;
         Rows = newRows;
+        _dirtyRows = new bool[newRows];
+        _allDirty = true;
         ScrollTop = 0;
         ScrollBottom = newRows - 1;
         CursorRow = Math.Min(CursorRow, newRows - 1);
@@ -682,9 +701,20 @@ public class TerminalBuffer
     /// </summary>
     public void MarkAllDirty()
     {
-        for (int r = 0; r < Rows; r++)
-            for (int c = 0; c < Cols; c++)
-                _cells[r, c].IsDirty = true;
+        _allDirty = true;
+    }
+
+    public bool IsRowDirty(int row) => _allDirty || (row >= 0 && row < Rows && _dirtyRows[row]);
+
+    public void MarkRowDirty(int row)
+    {
+        if (row >= 0 && row < Rows) _dirtyRows[row] = true;
+    }
+
+    public void ClearDirtyFlags()
+    {
+        _allDirty = false;
+        Array.Clear(_dirtyRows, 0, _dirtyRows.Length);
     }
 
     /// <summary>
