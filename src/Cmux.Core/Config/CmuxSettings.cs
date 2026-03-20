@@ -45,9 +45,9 @@ public class CmuxSettings
     public bool CaptureTranscriptsOnClose { get; set; } = true;
     public bool CaptureTranscriptsOnClear { get; set; } = true;
     // 0 = keep logs forever (no cleanup)
-    public int CommandLogRetentionDays { get; set; } = 90;
+    public int CommandLogRetentionDays { get; set; } = 1;
     // 0 = keep captures forever (no cleanup)
-    public int TranscriptRetentionDays { get; set; } = 90;
+    public int TranscriptRetentionDays { get; set; } = 1;
 
     // ── Collections ─────────────────────────────────────────────
 

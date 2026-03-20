@@ -58,11 +58,15 @@ public class CommandLogService
 
     public CommandLogService()
     {
-        ApplyRetentionPolicy();
-        ApplyTranscriptRetentionPolicy();
-        ScrubSensitiveDataInLogFiles();
-        ScrubSensitiveDataInTranscriptFiles();
-        LoadRecentFromDisk(days: GetLoadWindowDays());
+        // Defer heavy I/O to background — scrub + retention on 13k+ files was blocking startup for 30s+
+        Task.Run(() =>
+        {
+            ApplyRetentionPolicy();
+            ApplyTranscriptRetentionPolicy();
+            ScrubSensitiveDataInLogFiles();
+            ScrubSensitiveDataInTranscriptFiles();
+            LoadRecentFromDisk(days: GetLoadWindowDays());
+        });
 
         SettingsService.SettingsChanged += () =>
         {
