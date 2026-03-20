@@ -72,6 +72,26 @@ public class TerminalControl : FrameworkElement
     private readonly StringBuilder _textRunBuffer = new();
     private bool _suppressNextEnterTextInput;
 
+    // GlyphRun rendering
+    private GlyphTypeface? _glyphTypeface;
+    private GlyphTypeface? _glyphTypefaceBold;
+    private GlyphTypeface? _glyphTypefaceItalic;
+    private GlyphTypeface? _glyphTypefaceBoldItalic;
+    private readonly Dictionary<int, ushort> _glyphCache = new();
+    private readonly Dictionary<int, ushort> _glyphCacheBold = new();
+    private readonly Dictionary<int, ushort> _glyphCacheItalic = new();
+    private readonly Dictionary<int, ushort> _glyphCacheBoldItalic = new();
+
+    // Per-row rendering cache
+    private struct CachedRow
+    {
+        public List<(GlyphRun Run, SolidColorBrush Brush)>? GlyphRuns;
+        public List<(Rect Rect, SolidColorBrush Brush)>? Backgrounds;
+        public List<(Point From, Point To, Pen Pen)>? Decorations;
+    }
+    private CachedRow[]? _rowCache;
+    private int _lastViewStartLine = -1;
+
     /// <summary>Fired when the pane wants focus.</summary>
     public event Action? FocusRequested;
     public event Action<string>? CommandSubmitted;
@@ -145,6 +165,7 @@ public class TerminalControl : FrameworkElement
         _cursorBlink = settings.CursorBlink;
 
         CalculateCellSize();
+        InitGlyphTypefaces();
 
         Focusable = true;
         ClipToBounds = true;
@@ -153,7 +174,7 @@ public class TerminalControl : FrameworkElement
         Loaded += OnControlLoaded;
         Unloaded += OnControlUnloaded;
 
-        _selection.SelectionChanged += () => RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+        _selection.SelectionChanged += () => { _rowCache = null; RequestRender(System.Windows.Threading.DispatcherPriority.Render); };
 
         // Cursor blink
         _cursorTimer = new System.Windows.Threading.DispatcherTimer
@@ -250,6 +271,7 @@ public class TerminalControl : FrameworkElement
         _searchMatches = matches;
         _currentSearchMatch = currentIndex;
         RebuildSearchMatchCache();
+        _rowCache = null;
         RequestRender(System.Windows.Threading.DispatcherPriority.Render);
     }
 
@@ -259,6 +281,7 @@ public class TerminalControl : FrameworkElement
         _currentSearchMatch = -1;
         _searchMatchSetCache = null;
         _currentMatchSetCache = null;
+        _rowCache = null;
         RequestRender(System.Windows.Threading.DispatcherPriority.Render);
     }
 
@@ -344,6 +367,7 @@ public class TerminalControl : FrameworkElement
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
         base.OnRenderSizeChanged(sizeInfo);
+        _rowCache = null;
         CalculateTerminalSize();
         RequestRender(System.Windows.Threading.DispatcherPriority.Render);
     }
@@ -367,6 +391,61 @@ public class TerminalControl : FrameworkElement
         _typefaceBold = null;
         _typefaceItalic = null;
         _typefaceBoldItalic = null;
+        _rowCache = null;
+        InitGlyphTypefaces();
+    }
+
+    private void InitGlyphTypefaces()
+    {
+        _glyphTypeface = null;
+        _glyphTypefaceBold = null;
+        _glyphTypefaceItalic = null;
+        _glyphTypefaceBoldItalic = null;
+        _glyphCache.Clear();
+        _glyphCacheBold.Clear();
+        _glyphCacheItalic.Clear();
+        _glyphCacheBoldItalic.Clear();
+        _typeface.TryGetGlyphTypeface(out _glyphTypeface);
+    }
+
+    private GlyphTypeface? ResolveGlyphTypeface(bool bold, bool italic)
+    {
+        if (!bold && !italic) return _glyphTypeface;
+        if (bold && !italic)
+        {
+            if (_glyphTypefaceBold == null)
+                GetTypeface(true, false).TryGetGlyphTypeface(out _glyphTypefaceBold);
+            return _glyphTypefaceBold;
+        }
+        if (!bold && italic)
+        {
+            if (_glyphTypefaceItalic == null)
+                GetTypeface(false, true).TryGetGlyphTypeface(out _glyphTypefaceItalic);
+            return _glyphTypefaceItalic;
+        }
+        if (_glyphTypefaceBoldItalic == null)
+            GetTypeface(true, true).TryGetGlyphTypeface(out _glyphTypefaceBoldItalic);
+        return _glyphTypefaceBoldItalic;
+    }
+
+    private Dictionary<int, ushort> ResolveGlyphCache(bool bold, bool italic) =>
+        (bold, italic) switch
+        {
+            (false, false) => _glyphCache,
+            (true, false) => _glyphCacheBold,
+            (false, true) => _glyphCacheItalic,
+            _ => _glyphCacheBoldItalic,
+        };
+
+    private static ushort LookupGlyph(GlyphTypeface gt, Dictionary<int, ushort> cache, int codepoint)
+    {
+        if (cache.TryGetValue(codepoint, out var idx)) return idx;
+        if (gt.CharacterToGlyphMap.TryGetValue(codepoint, out idx))
+        {
+            cache[codepoint] = idx;
+            return idx;
+        }
+        return 0; // missing glyph
     }
 
     private static readonly string FontFallbacks = ", Segoe UI Symbol, Segoe UI Emoji, Arial Unicode MS";
@@ -393,7 +472,6 @@ public class TerminalControl : FrameworkElement
             var bgColor = ToWpfColor(_theme.Background);
             dc.DrawRectangle(GetCachedBrush(bgColor), null, new Rect(0, 0, ActualWidth, ActualHeight));
 
-
             // Notification ring
             if (HasNotification)
             {
@@ -415,142 +493,71 @@ public class TerminalControl : FrameworkElement
             bool isScrolledBack = _scrollOffset < 0;
             int viewStartLine = scrollbackCount + _scrollOffset;
 
+            // Detect viewport movement — invalidate all caches
+            if (viewStartLine != _lastViewStartLine)
+            {
+                _rowCache = null;
+                _lastViewStartLine = viewStartLine;
+            }
+
+            if (_rowCache == null || _rowCache.Length != _rows)
+                _rowCache = new CachedRow[_rows];
+
             // Use cached search match sets (built once in SetSearchHighlights)
             var searchMatchSet = _searchMatchSetCache ?? EmptyMatchSet;
             var currentMatchSet = _currentMatchSetCache ?? EmptyMatchSet;
             var searchMatchBrush = searchMatchSet.Count > 0 ? GetCachedBrush(Color.FromArgb(100, 0xFB, 0xBF, 0x24)) : null;
             var currentMatchBrush = currentMatchSet.Count > 0 ? GetCachedBrush(Color.FromArgb(180, 0xFB, 0x92, 0x3C)) : null;
 
-            // Render visible rows with batched text
-            for (int visRow = 0; visRow < _rows; visRow++)
+            // GlyphRun fallback: if GlyphTypeface init failed, use FormattedText path
+            bool useGlyphRun = _glyphTypeface != null;
+
+            // Lock buffer, rebuild dirty rows
+            lock (_session.RenderLock)
             {
-                int virtualLine = viewStartLine + visRow;
-                bool isScrollback = virtualLine < scrollbackCount;
-                int bufferRow = virtualLine - scrollbackCount;
-
-                TerminalCell[]? scrollbackLine = null;
-                if (isScrollback)
-                    scrollbackLine = buffer.GetScrollbackLine(virtualLine);
-
-                double y = visRow * _cellHeight;
-
-                // Text run state for batching
-                int runStartCol = -1;
-                Color runFgColor = default;
-                bool runBold = false, runItalic = false, runDim = false;
-                bool runUnderline = false, runStrikethrough = false;
-                _textRunBuffer.Clear();
-
-                for (int c = 0; c < _cols; c++)
+                for (int visRow = 0; visRow < _rows; visRow++)
                 {
-                    TerminalCell cell;
-                    if (isScrollback)
-                    {
-                        cell = (scrollbackLine != null && c < scrollbackLine.Length)
-                            ? scrollbackLine[c]
-                            : TerminalCell.Empty;
-                    }
-                    else if (bufferRow >= 0 && bufferRow < buffer.Rows && c < buffer.Cols)
-                    {
-                        cell = buffer.CellAt(bufferRow, c);
-                    }
-                    else
-                    {
-                        cell = TerminalCell.Empty;
-                    }
+                    int virtualLine = viewStartLine + visRow;
+                    int bufferRow = virtualLine - scrollbackCount;
+                    bool isLiveRow = bufferRow >= 0 && bufferRow < buffer.Rows;
 
-                    double x = HorizontalPadding + c * _cellWidth;
-                    var attr = cell.Attribute;
-                    bool isSelected = _selection.IsSelected(visRow, c);
-                    bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse) != isSelected;
+                    bool needsRebuild = _rowCache[visRow].GlyphRuns == null
+                        || (isLiveRow && buffer.IsRowDirty(bufferRow));
 
-                    // Cell colors
-                    TerminalColor cellBg, cellFg;
-                    if (isInverse)
+                    if (needsRebuild)
                     {
-                        cellBg = attr.Foreground.IsDefault ? _theme.Foreground : attr.Foreground;
-                        cellFg = attr.Background.IsDefault ? _theme.Background : attr.Background;
-                    }
-                    else
-                    {
-                        cellBg = attr.Background;
-                        cellFg = attr.Foreground;
-                    }
-
-                    if (isSelected && _theme.SelectionBackground.HasValue)
-                        cellBg = _theme.SelectionBackground.Value;
-
-                    // Draw cell background (ceil dimensions to prevent sub-pixel gaps between cells)
-                    double ceilW = Math.Ceiling(_cellWidth);
-                    double ceilH = Math.Ceiling(_cellHeight);
-                    if (!cellBg.IsDefault)
-                    {
-                        dc.DrawRectangle(GetCachedBrush(ToWpfColor(cellBg)), null,
-                            new Rect(x, y, ceilW, ceilH));
-                    }
-
-                    // Search match highlight (behind text)
-                    bool isSearchMatch = searchMatchSet.Contains((visRow, c));
-                    bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
-                    if (isCurrentMatch)
-                        dc.DrawRectangle(currentMatchBrush, null, new Rect(x, y, ceilW, ceilH));
-                    else if (isSearchMatch)
-                        dc.DrawRectangle(searchMatchBrush, null, new Rect(x, y, ceilW, ceilH));
-
-                    // URL hover highlight
-                    if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
-                    {
-                        var urlPen = new Pen(GetCachedBrush(Color.FromRgb(0x81, 0x8C, 0xF8)), 1);
-                        urlPen.Freeze();
-                        dc.DrawLine(urlPen, new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1));
-                    }
-
-                    // Text batching: group consecutive characters with same visual style
-                    bool hasChar = cell.Character != '\0' && cell.Character != ' ';
-                    if (hasChar)
-                    {
-                        var fgColor = cellFg.IsDefault ? ToWpfColor(_theme.Foreground) : ToWpfColor(cellFg);
-                        bool bold = attr.Flags.HasFlag(CellFlags.Bold);
-                        bool italic = attr.Flags.HasFlag(CellFlags.Italic);
-                        bool dim = attr.Flags.HasFlag(CellFlags.Dim);
-                        bool underline = attr.Flags.HasFlag(CellFlags.Underline);
-                        bool strikethrough = attr.Flags.HasFlag(CellFlags.Strikethrough);
-
-                        // Style changed? Flush the current run first
-                        if (runStartCol >= 0 && (fgColor != runFgColor || bold != runBold ||
-                            italic != runItalic || dim != runDim ||
-                            underline != runUnderline || strikethrough != runStrikethrough))
+                        if (useGlyphRun)
                         {
-                            FlushTextRun(dc, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
-                            runStartCol = -1;
+                            BuildRowCache(ref _rowCache[visRow], visRow, buffer,
+                                virtualLine, scrollbackCount, dpi,
+                                searchMatchSet, currentMatchSet,
+                                searchMatchBrush, currentMatchBrush);
                         }
-
-                        // Start new run or continue existing
-                        if (runStartCol < 0)
+                        else
                         {
-                            runStartCol = c;
-                            runFgColor = fgColor;
-                            runBold = bold;
-                            runItalic = italic;
-                            runDim = dim;
-                            runUnderline = underline;
-                            runStrikethrough = strikethrough;
-                            _textRunBuffer.Clear();
+                            BuildRowCacheFallback(ref _rowCache[visRow], visRow, buffer,
+                                virtualLine, scrollbackCount, dpi,
+                                searchMatchSet, currentMatchSet,
+                                searchMatchBrush, currentMatchBrush);
                         }
-
-                        _textRunBuffer.Append(cell.Character);
-                    }
-                    else if (runStartCol >= 0)
-                    {
-                        // Empty cell — flush the current run
-                        FlushTextRun(dc, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
-                        runStartCol = -1;
                     }
                 }
+                buffer.ClearDirtyFlags();
+            }
 
-                // Flush final run for this row
-                if (runStartCol >= 0)
-                    FlushTextRun(dc, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+            // Replay all cached rows to DrawingContext
+            for (int visRow = 0; visRow < _rows; visRow++)
+            {
+                ref var cache = ref _rowCache[visRow];
+                if (cache.Backgrounds != null)
+                    foreach (var (rect, brush) in cache.Backgrounds)
+                        dc.DrawRectangle(brush, null, rect);
+                if (cache.GlyphRuns != null)
+                    foreach (var (run, brush) in cache.GlyphRuns)
+                        dc.DrawGlyphRun(brush, run);
+                if (cache.Decorations != null)
+                    foreach (var (from, to, pen) in cache.Decorations)
+                        dc.DrawLine(pen, from, to);
             }
 
             // Cursor (only when viewing live buffer)
@@ -634,9 +641,354 @@ public class TerminalControl : FrameworkElement
     }
 
     /// <summary>
-    /// Draws a batched text run and its decorations (underline/strikethrough).
+    /// Builds the GlyphRun-based cached rendering data for a single visible row.
     /// </summary>
-    private void FlushTextRun(DrawingContext dc, double dpi, double y, int startCol,
+    private void BuildRowCache(ref CachedRow cache, int visRow, TerminalBuffer buffer,
+        int virtualLine, int scrollbackCount, double dpi,
+        HashSet<(int row, int col)> searchMatchSet, HashSet<(int row, int col)> currentMatchSet,
+        SolidColorBrush? searchMatchBrush, SolidColorBrush? currentMatchBrush)
+    {
+        cache.GlyphRuns = new();
+        cache.Backgrounds = new();
+        cache.Decorations = new();
+
+        bool isScrollback = virtualLine < scrollbackCount;
+        int bufferRow = virtualLine - scrollbackCount;
+
+        TerminalCell[]? scrollbackLine = null;
+        if (isScrollback)
+            scrollbackLine = buffer.GetScrollbackLine(virtualLine);
+
+        double y = visRow * _cellHeight;
+        double ceilW = Math.Ceiling(_cellWidth);
+        double ceilH = Math.Ceiling(_cellHeight);
+
+        // Text run state for batching
+        int runStartCol = -1;
+        Color runFgColor = default;
+        bool runBold = false, runItalic = false, runDim = false;
+        bool runUnderline = false, runStrikethrough = false;
+        _textRunBuffer.Clear();
+
+        for (int c = 0; c < _cols; c++)
+        {
+            TerminalCell cell;
+            if (isScrollback)
+            {
+                cell = (scrollbackLine != null && c < scrollbackLine.Length)
+                    ? scrollbackLine[c]
+                    : TerminalCell.Empty;
+            }
+            else if (bufferRow >= 0 && bufferRow < buffer.Rows && c < buffer.Cols)
+            {
+                cell = buffer.CellAt(bufferRow, c);
+            }
+            else
+            {
+                cell = TerminalCell.Empty;
+            }
+
+            double x = HorizontalPadding + c * _cellWidth;
+            var attr = cell.Attribute;
+            bool isSelected = _selection.IsSelected(visRow, c);
+            bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse) != isSelected;
+
+            // Cell colors
+            TerminalColor cellBg, cellFg;
+            if (isInverse)
+            {
+                cellBg = attr.Foreground.IsDefault ? _theme.Foreground : attr.Foreground;
+                cellFg = attr.Background.IsDefault ? _theme.Background : attr.Background;
+            }
+            else
+            {
+                cellBg = attr.Background;
+                cellFg = attr.Foreground;
+            }
+
+            if (isSelected && _theme.SelectionBackground.HasValue)
+                cellBg = _theme.SelectionBackground.Value;
+
+            // Background rectangle (ceil dimensions to prevent sub-pixel gaps)
+            if (!cellBg.IsDefault)
+            {
+                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), GetCachedBrush(ToWpfColor(cellBg))));
+            }
+
+            // Search match highlight (behind text)
+            bool isSearchMatch = searchMatchSet.Contains((visRow, c));
+            bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
+            if (isCurrentMatch)
+                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), currentMatchBrush!));
+            else if (isSearchMatch)
+                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), searchMatchBrush!));
+
+            // URL hover highlight
+            if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
+            {
+                var urlPen = new Pen(GetCachedBrush(Color.FromRgb(0x81, 0x8C, 0xF8)), 1);
+                urlPen.Freeze();
+                cache.Decorations.Add((new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1), urlPen));
+            }
+
+            // Text batching: group consecutive characters with same visual style
+            bool hasChar = cell.Character != '\0' && cell.Character != ' ';
+            if (hasChar)
+            {
+                var fgColor = cellFg.IsDefault ? ToWpfColor(_theme.Foreground) : ToWpfColor(cellFg);
+                bool bold = attr.Flags.HasFlag(CellFlags.Bold);
+                bool italic = attr.Flags.HasFlag(CellFlags.Italic);
+                bool dim = attr.Flags.HasFlag(CellFlags.Dim);
+                bool underline = attr.Flags.HasFlag(CellFlags.Underline);
+                bool strikethrough = attr.Flags.HasFlag(CellFlags.Strikethrough);
+
+                // Style changed? Flush the current run first
+                if (runStartCol >= 0 && (fgColor != runFgColor || bold != runBold ||
+                    italic != runItalic || dim != runDim ||
+                    underline != runUnderline || strikethrough != runStrikethrough))
+                {
+                    FlushGlyphRun(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+                    runStartCol = -1;
+                }
+
+                // Start new run or continue existing
+                if (runStartCol < 0)
+                {
+                    runStartCol = c;
+                    runFgColor = fgColor;
+                    runBold = bold;
+                    runItalic = italic;
+                    runDim = dim;
+                    runUnderline = underline;
+                    runStrikethrough = strikethrough;
+                    _textRunBuffer.Clear();
+                }
+
+                _textRunBuffer.Append(cell.Character);
+            }
+            else if (runStartCol >= 0)
+            {
+                // Empty cell — flush the current run
+                FlushGlyphRun(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+                runStartCol = -1;
+            }
+        }
+
+        // Flush final run for this row
+        if (runStartCol >= 0)
+            FlushGlyphRun(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+    }
+
+    /// <summary>
+    /// Flushes a batched text run as a GlyphRun into the row cache.
+    /// Uses fixed advance widths for perfect character alignment.
+    /// </summary>
+    private void FlushGlyphRun(ref CachedRow cache, double dpi, double y, int startCol,
+        Color fgColor, bool bold, bool italic, bool dim, bool underline, bool strikethrough)
+    {
+        if (_textRunBuffer.Length == 0) return;
+
+        var gt = ResolveGlyphTypeface(bold, italic);
+        if (gt == null) return; // should not happen since caller checks _glyphTypeface != null
+
+        var glyphCacheMap = ResolveGlyphCache(bold, italic);
+        var str = _textRunBuffer.ToString();
+        var fallbackIdx = LookupGlyph(gt, glyphCacheMap, '?');
+
+        var glyphIndices = new ushort[str.Length];
+        var advanceWidths = new double[str.Length];
+
+        for (int i = 0; i < str.Length; i++)
+        {
+            var idx = LookupGlyph(gt, glyphCacheMap, str[i]);
+            if (idx == 0 && str[i] != ' ' && str[i] != '\0')
+                idx = fallbackIdx;
+            glyphIndices[i] = idx;
+            advanceWidths[i] = _cellWidth; // FIXED width — fixes character misalignment
+        }
+
+        double x = HorizontalPadding + startCol * _cellWidth;
+        double baseline = y + gt.Baseline * _fontSize;
+
+        var glyphRun = new GlyphRun(
+            glyphTypeface: gt,
+            bidiLevel: 0,
+            isSideways: false,
+            renderingEmSize: _fontSize,
+            pixelsPerDip: (float)dpi,
+            glyphIndices: glyphIndices,
+            baselineOrigin: new Point(x, baseline),
+            advanceWidths: advanceWidths,
+            glyphOffsets: null,
+            characters: null,
+            deviceFontName: null,
+            clusterMap: null,
+            caretStops: null,
+            language: null);
+
+        var brush = dim
+            ? GetCachedBrush(Color.FromArgb(128, fgColor.R, fgColor.G, fgColor.B))
+            : GetCachedBrush(fgColor);
+
+        cache.GlyphRuns!.Add((glyphRun, brush));
+
+        double runWidth = str.Length * _cellWidth;
+
+        if (underline)
+        {
+            var pen = new Pen(brush, 1);
+            pen.Freeze();
+            cache.Decorations!.Add((new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1), pen));
+        }
+
+        if (strikethrough)
+        {
+            var pen = new Pen(brush, 1);
+            pen.Freeze();
+            cache.Decorations!.Add((new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2), pen));
+        }
+    }
+
+    /// <summary>
+    /// Fallback row cache builder using FormattedText when GlyphTypeface is unavailable.
+    /// </summary>
+    private void BuildRowCacheFallback(ref CachedRow cache, int visRow, TerminalBuffer buffer,
+        int virtualLine, int scrollbackCount, double dpi,
+        HashSet<(int row, int col)> searchMatchSet, HashSet<(int row, int col)> currentMatchSet,
+        SolidColorBrush? searchMatchBrush, SolidColorBrush? currentMatchBrush)
+    {
+        cache.GlyphRuns = new();
+        cache.Backgrounds = new();
+        cache.Decorations = new();
+
+        bool isScrollback = virtualLine < scrollbackCount;
+        int bufferRow = virtualLine - scrollbackCount;
+
+        TerminalCell[]? scrollbackLine = null;
+        if (isScrollback)
+            scrollbackLine = buffer.GetScrollbackLine(virtualLine);
+
+        double y = visRow * _cellHeight;
+        double ceilW = Math.Ceiling(_cellWidth);
+        double ceilH = Math.Ceiling(_cellHeight);
+
+        // Text run state for batching
+        int runStartCol = -1;
+        Color runFgColor = default;
+        bool runBold = false, runItalic = false, runDim = false;
+        bool runUnderline = false, runStrikethrough = false;
+        _textRunBuffer.Clear();
+
+        for (int c = 0; c < _cols; c++)
+        {
+            TerminalCell cell;
+            if (isScrollback)
+            {
+                cell = (scrollbackLine != null && c < scrollbackLine.Length)
+                    ? scrollbackLine[c]
+                    : TerminalCell.Empty;
+            }
+            else if (bufferRow >= 0 && bufferRow < buffer.Rows && c < buffer.Cols)
+            {
+                cell = buffer.CellAt(bufferRow, c);
+            }
+            else
+            {
+                cell = TerminalCell.Empty;
+            }
+
+            double x = HorizontalPadding + c * _cellWidth;
+            var attr = cell.Attribute;
+            bool isSelected = _selection.IsSelected(visRow, c);
+            bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse) != isSelected;
+
+            // Cell colors
+            TerminalColor cellBg, cellFg;
+            if (isInverse)
+            {
+                cellBg = attr.Foreground.IsDefault ? _theme.Foreground : attr.Foreground;
+                cellFg = attr.Background.IsDefault ? _theme.Background : attr.Background;
+            }
+            else
+            {
+                cellBg = attr.Background;
+                cellFg = attr.Foreground;
+            }
+
+            if (isSelected && _theme.SelectionBackground.HasValue)
+                cellBg = _theme.SelectionBackground.Value;
+
+            // Background rectangle
+            if (!cellBg.IsDefault)
+            {
+                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), GetCachedBrush(ToWpfColor(cellBg))));
+            }
+
+            // Search match highlight
+            bool isSearchMatch = searchMatchSet.Contains((visRow, c));
+            bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
+            if (isCurrentMatch)
+                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), currentMatchBrush!));
+            else if (isSearchMatch)
+                cache.Backgrounds.Add((new Rect(x, y, ceilW, ceilH), searchMatchBrush!));
+
+            // URL hover highlight
+            if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
+            {
+                var urlPen = new Pen(GetCachedBrush(Color.FromRgb(0x81, 0x8C, 0xF8)), 1);
+                urlPen.Freeze();
+                cache.Decorations.Add((new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1), urlPen));
+            }
+
+            // Text batching
+            bool hasChar = cell.Character != '\0' && cell.Character != ' ';
+            if (hasChar)
+            {
+                var fgColor = cellFg.IsDefault ? ToWpfColor(_theme.Foreground) : ToWpfColor(cellFg);
+                bool bold = attr.Flags.HasFlag(CellFlags.Bold);
+                bool italic = attr.Flags.HasFlag(CellFlags.Italic);
+                bool dim = attr.Flags.HasFlag(CellFlags.Dim);
+                bool underline = attr.Flags.HasFlag(CellFlags.Underline);
+                bool strikethrough = attr.Flags.HasFlag(CellFlags.Strikethrough);
+
+                if (runStartCol >= 0 && (fgColor != runFgColor || bold != runBold ||
+                    italic != runItalic || dim != runDim ||
+                    underline != runUnderline || strikethrough != runStrikethrough))
+                {
+                    FlushTextRunToCache(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+                    runStartCol = -1;
+                }
+
+                if (runStartCol < 0)
+                {
+                    runStartCol = c;
+                    runFgColor = fgColor;
+                    runBold = bold;
+                    runItalic = italic;
+                    runDim = dim;
+                    runUnderline = underline;
+                    runStrikethrough = strikethrough;
+                    _textRunBuffer.Clear();
+                }
+
+                _textRunBuffer.Append(cell.Character);
+            }
+            else if (runStartCol >= 0)
+            {
+                FlushTextRunToCache(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+                runStartCol = -1;
+            }
+        }
+
+        if (runStartCol >= 0)
+            FlushTextRunToCache(ref cache, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+    }
+
+    /// <summary>
+    /// Fallback: flushes a batched text run as a FormattedText-based GlyphRun into the cache.
+    /// Used when GlyphTypeface is unavailable (e.g. some font families).
+    /// </summary>
+    private void FlushTextRunToCache(ref CachedRow cache, double dpi, double y, int startCol,
         Color fgColor, bool bold, bool italic, bool dim, bool underline, bool strikethrough)
     {
         if (_textRunBuffer.Length == 0) return;
@@ -655,7 +1007,40 @@ public class TerminalControl : FrameworkElement
             dpi);
 
         double x = HorizontalPadding + startCol * _cellWidth;
-        dc.DrawText(text, new Point(x, y));
+
+        // Convert FormattedText to a GlyphRun for the unified cache replay path
+        // Build the GlyphRun via the text's geometry as a fallback
+        if (tf.TryGetGlyphTypeface(out var gt))
+        {
+            var str = _textRunBuffer.ToString();
+            var glyphIndices = new ushort[str.Length];
+            var advanceWidths = new double[str.Length];
+
+            for (int i = 0; i < str.Length; i++)
+            {
+                gt.CharacterToGlyphMap.TryGetValue(str[i], out var idx);
+                glyphIndices[i] = idx;
+                advanceWidths[i] = _cellWidth;
+            }
+
+            var glyphRun = new GlyphRun(
+                glyphTypeface: gt,
+                bidiLevel: 0,
+                isSideways: false,
+                renderingEmSize: _fontSize,
+                pixelsPerDip: (float)dpi,
+                glyphIndices: glyphIndices,
+                baselineOrigin: new Point(x, y + gt.Baseline * _fontSize),
+                advanceWidths: advanceWidths,
+                glyphOffsets: null,
+                characters: null,
+                deviceFontName: null,
+                clusterMap: null,
+                caretStops: null,
+                language: null);
+
+            cache.GlyphRuns!.Add((glyphRun, brush));
+        }
 
         double runWidth = _textRunBuffer.Length * _cellWidth;
 
@@ -663,14 +1048,14 @@ public class TerminalControl : FrameworkElement
         {
             var pen = new Pen(brush, 1);
             pen.Freeze();
-            dc.DrawLine(pen, new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1));
+            cache.Decorations!.Add((new Point(x, y + _cellHeight - 1), new Point(x + runWidth, y + _cellHeight - 1), pen));
         }
 
         if (strikethrough)
         {
             var pen = new Pen(brush, 1);
             pen.Freeze();
-            dc.DrawLine(pen, new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2));
+            cache.Decorations!.Add((new Point(x, y + _cellHeight / 2), new Point(x + runWidth, y + _cellHeight / 2), pen));
         }
     }
 
@@ -1298,7 +1683,10 @@ public class TerminalControl : FrameworkElement
 
             Cursor = _hoveredUrl.HasValue ? Cursors.Hand : Cursors.Arrow;
             if (_hoveredUrl != oldHover)
+            {
+                _rowCache = null;
                 RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+            }
         }
         else if (_hoveredUrl.HasValue)
         {
@@ -1306,6 +1694,7 @@ public class TerminalControl : FrameworkElement
             _lastUrlRow = -1;
             _cachedRowUrls = null;
             Cursor = Cursors.Arrow;
+            _rowCache = null;
             RequestRender(System.Windows.Threading.DispatcherPriority.Render);
         }
 

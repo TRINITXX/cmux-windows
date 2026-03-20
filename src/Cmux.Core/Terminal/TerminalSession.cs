@@ -24,6 +24,9 @@ public sealed class TerminalSession : IDisposable
     private volatile bool _localWriteNullLogged;
     private readonly object _lock = new();
 
+    /// <summary>Lock used to synchronize buffer reads (rendering) with buffer writes (VT parsing).</summary>
+    public object RenderLock => _lock;
+
     public TerminalBuffer Buffer { get; }
     public string PaneId { get; }
     public string? Title { get; private set; }
