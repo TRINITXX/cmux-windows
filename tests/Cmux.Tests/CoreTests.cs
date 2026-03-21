@@ -650,6 +650,21 @@ public class MouseModeTests
     }
 }
 
+public class DaemonClientTests
+{
+    [Fact]
+    public void FindDaemonExecutable_ReturnsPath_WhenDaemonBuilt()
+    {
+        var path = Cmux.Core.IPC.DaemonClient.FindDaemonExecutable();
+
+        if (path != null)
+        {
+            File.Exists(path).Should().BeTrue();
+            Path.GetFileName(path).Should().Be("cmux-daemon.exe");
+        }
+    }
+}
+
 public class AgentConversationStoreMessageParsingTests
 {
     private static readonly MethodInfo ReadMessagesMethod = typeof(AgentConversationStoreService)

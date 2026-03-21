@@ -176,6 +176,36 @@ public sealed class DaemonClient : IDisposable
             // Filesystem errors during search — not critical
         }
 
+        // 3. Look relative to executable location (handles non-standard paths after reboot)
+        try
+        {
+            var exeLocation = Environment.ProcessPath;
+            if (exeLocation != null)
+            {
+                var exeDir = new DirectoryInfo(Path.GetDirectoryName(exeLocation)!);
+                var dir = exeDir;
+                while (dir != null && !string.Equals(dir.Name, "src", StringComparison.OrdinalIgnoreCase))
+                    dir = dir.Parent;
+
+                if (dir != null)
+                {
+                    var daemonPath = Path.Combine(dir.FullName, "Cmux.Daemon", "bin");
+                    if (Directory.Exists(daemonPath))
+                    {
+                        foreach (var exe in Directory.GetFiles(daemonPath, "cmux-daemon.exe", SearchOption.AllDirectories))
+                        {
+                            LogDaemon($"[FindDaemon] Found via ProcessPath: {exe}");
+                            return exe;
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Not critical
+        }
+
         return null;
     }
 
