@@ -42,7 +42,7 @@ public class TerminalControl : FrameworkElement
     private int _lastScrollbackCount;
     private volatile bool _needsRender;
     private bool _scrollbarDragging;
-    private bool _diagColorLogged; // DIAG: one-shot color debug
+
     private string _cursorStyle = "bar";
     private bool _cursorBlink = true;
 
