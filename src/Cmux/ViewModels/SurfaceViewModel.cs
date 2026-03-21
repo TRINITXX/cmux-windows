@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cmux.Core.Config;
@@ -67,6 +68,17 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         App.ClaudeStatusService.ClaudeCodeDetected += OnClaudeCodeDetected;
         App.TitleService.TitleGenerated += OnTitleGenerated;
 
+        // Inject shell history before starting sessions (reboot scenario only)
+        if (App.NeedClaudeResume)
+        {
+            foreach (var leaf in _rootNode.GetLeaves())
+            {
+                if (leaf.PaneId == null) continue;
+                if (Surface.PaneSnapshots.TryGetValue(leaf.PaneId, out var snap))
+                    InjectShellHistory(snap);
+            }
+        }
+
         // Start terminal sessions for all leaf nodes
         foreach (var leaf in _rootNode.GetLeaves())
         {
@@ -114,6 +126,32 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
         // Only relaunch Claude Code panes after a fresh daemon start (PC reboot).
         // If daemon was already running (normal close/reopen), sessions are still alive.
         RelaunchClaudeCodePanes();
+    }
+
+    private static void InjectShellHistory(PaneStateSnapshot snapshot)
+    {
+        if (snapshot.CommandHistory.Count == 0) return;
+
+        try
+        {
+            // Bash history
+            var bashHistory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".bash_history");
+            File.AppendAllLines(bashHistory, snapshot.CommandHistory);
+
+            // PowerShell PSReadLine history
+            var psHistoryDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft", "Windows", "PowerShell", "PSReadLine");
+            var psHistory = Path.Combine(psHistoryDir, "ConsoleHost_history.txt");
+            if (Directory.Exists(psHistoryDir))
+                File.AppendAllLines(psHistory, snapshot.CommandHistory);
+        }
+        catch (Exception ex)
+        {
+            App.DaemonLog($"[InjectShellHistory] Error: {ex.Message}");
+        }
     }
 
     private void RelaunchClaudeCodePanes()

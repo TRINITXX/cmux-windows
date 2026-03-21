@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _autoSaveTimer;
     private ICollectionView? _workspaceView;
     private bool _zenMode;
+    private bool _sessionSavedForShutdown;
     private Cmux.Core.Models.Surface? _currentBrowserSurface;
     private WorkspaceViewModel? _subscribedWorkspace;
     public MainWindow()
@@ -76,11 +77,26 @@ public partial class MainWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        // WM_GETMINMAXINFO = 0x0024
-        if (msg == 0x0024)
+        const int WM_QUERYENDSESSION = 0x0011;
+        const int WM_ENDSESSION = 0x0016;
+        const int WM_GETMINMAXINFO = 0x0024;
+
+        if (msg == WM_GETMINMAXINFO)
         {
             WmGetMinMaxInfo(hwnd, lParam);
             handled = true;
+        }
+        else if ((msg == WM_QUERYENDSESSION || (msg == WM_ENDSESSION && wParam != IntPtr.Zero))
+                 && !_sessionSavedForShutdown)
+        {
+            _sessionSavedForShutdown = true;
+            ViewModel.SaveSession(Left, Top, Width, Height,
+                WindowState == WindowState.Maximized);
+            if (msg == WM_QUERYENDSESSION)
+            {
+                handled = true;
+                return new IntPtr(1); // Allow shutdown to continue
+            }
         }
         return IntPtr.Zero;
     }
