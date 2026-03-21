@@ -412,6 +412,32 @@ public class TerminalControl : FrameworkElement
         return finalSize;
     }
 
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+
+        CalculateCellSize();
+        CalculateTerminalSize();
+
+        if (_gpuRenderer?.IsInitialized == true)
+        {
+            _gpuRenderer.UpdateFont(
+                _theme.FontFamily,
+                (float)_fontSize,
+                (float)newDpi.PixelsPerDip,
+                (float)_cellWidth,
+                (float)_cellHeight);
+
+            int pw = (int)(ActualWidth * newDpi.PixelsPerDip);
+            int ph = (int)(ActualHeight * newDpi.PixelsPerDip);
+            if (pw > 0 && ph > 0)
+                _gpuRenderer.ResizeSwapChain(pw, ph, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
+        }
+
+        _forceFullRedraw = true;
+        _needsRender = true;
+    }
+
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
         base.OnRenderSizeChanged(sizeInfo);
