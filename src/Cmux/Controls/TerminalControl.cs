@@ -317,6 +317,7 @@ public class TerminalControl : FrameworkElement
         CompositionTarget.Rendering -= OnCompositionTargetRendering;
         _gpuRenderer?.Dispose();
         _gpuRenderer = null;
+        _renderHost?.Dispose();
         _gpuInitialized = false;
     }
 
@@ -330,7 +331,7 @@ public class TerminalControl : FrameworkElement
         if (!_gpuInitialized && _renderHost?.Hwnd != nint.Zero)
         {
             InitializeGpuRenderer();
-            _gpuInitialized = true;
+            _gpuInitialized = _gpuRenderer != null;
         }
         if (_gpuRenderer == null || !_gpuRenderer.IsInitialized) return;
 
@@ -399,6 +400,18 @@ public class TerminalControl : FrameworkElement
         }
     }
 
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        _renderHost?.Measure(availableSize);
+        return availableSize;
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        _renderHost?.Arrange(new Rect(finalSize));
+        return finalSize;
+    }
+
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
         base.OnRenderSizeChanged(sizeInfo);
@@ -416,37 +429,6 @@ public class TerminalControl : FrameworkElement
 
         RequestRender(System.Windows.Threading.DispatcherPriority.Render);
     }
-
-    private static TerminalCell GetCell(int col, bool isScrollback, TerminalCell[]? scrollbackLine, int bufferRow, TerminalBuffer buffer)
-    {
-        if (isScrollback)
-            return (scrollbackLine != null && col < scrollbackLine.Length) ? scrollbackLine[col] : TerminalCell.Empty;
-        if (bufferRow >= 0 && bufferRow < buffer.Rows && col < buffer.Cols)
-            return buffer.CellAt(bufferRow, col);
-        return TerminalCell.Empty;
-    }
-
-    private static Color ToWpfColor(TerminalColor c) =>
-        c.IsDefault ? Colors.Transparent : Color.FromRgb(c.R, c.G, c.B);
-
-    /// <summary>WCAG 2.0 contrast ratio between two colors (1:1 to 21:1).</summary>
-    private static double WcagContrastRatio(Color a, Color b)
-    {
-        double la = RelativeLuminance(a), lb = RelativeLuminance(b);
-        double lighter = Math.Max(la, lb), darker = Math.Min(la, lb);
-        return (lighter + 0.05) / (darker + 0.05);
-    }
-
-    private static double RelativeLuminance(Color c)
-    {
-        double r = SrgbToLinear(c.R / 255.0);
-        double g = SrgbToLinear(c.G / 255.0);
-        double b = SrgbToLinear(c.B / 255.0);
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    }
-
-    private static double SrgbToLinear(double v) =>
-        v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
 
     // --- Mouse reporting ---
 
