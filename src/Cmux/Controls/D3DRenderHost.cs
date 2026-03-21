@@ -19,6 +19,11 @@ internal sealed class D3DRenderHost : HwndHost
 
     public nint Hwnd => _hwnd;
 
+    public D3DRenderHost()
+    {
+        Focusable = true;
+    }
+
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
         EnsureWindowClassRegistered();
@@ -66,8 +71,8 @@ internal sealed class D3DRenderHost : HwndHost
 
             case WM_LBUTTONDOWN:
             {
-                // Capture mouse for drag selection
-                CaptureMouse();
+                // Give WPF focus to this element first (fixes first-click-ignored issue)
+                Focus();
                 var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
                 {
                     RoutedEvent = UIElement.MouseLeftButtonDownEvent,
@@ -91,9 +96,21 @@ internal sealed class D3DRenderHost : HwndHost
 
             case WM_RBUTTONDOWN:
             {
+                Focus();
                 var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
                 {
                     RoutedEvent = UIElement.MouseRightButtonDownEvent,
+                };
+                RaiseEvent(args);
+                handled = true;
+                return nint.Zero;
+            }
+
+            case WM_RBUTTONUP:
+            {
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.MouseRightButtonUpEvent,
                 };
                 RaiseEvent(args);
                 handled = true;
@@ -141,6 +158,7 @@ internal sealed class D3DRenderHost : HwndHost
     private const int WM_LBUTTONDOWN = 0x0201;
     private const int WM_LBUTTONUP = 0x0202;
     private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_RBUTTONUP = 0x0205;
     private const int WM_MOUSEWHEEL = 0x020A;
 
     private static readonly nint DefWindowProcPtr =
