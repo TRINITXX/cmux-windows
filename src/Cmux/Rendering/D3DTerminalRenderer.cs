@@ -271,13 +271,19 @@ internal sealed class D3DTerminalRenderer : IDisposable
         _cellBuffer.Upload(_context);
 
         // Update constant buffer
+        // Cell dimensions and padding must be in device pixels (not WPF DIPs)
+        // because the shader operates in pixel space matching the swap chain.
+        float cellWidthPx = _cellWidth * _dpi;
+        float cellHeightPx = _cellHeight * _dpi;
+        float paddingPx = HorizontalPadding * _dpi;
+
         var constants = new ConstantBufferData
         {
-            CellSize = new Vector2(_cellWidth, _cellHeight),
+            CellSize = new Vector2(cellWidthPx, cellHeightPx),
             GridSize = new Vector2(_cols, _rows),
             AtlasSize = new Vector2(AtlasSize, AtlasSize),
             ViewportSize = new Vector2(_pixelWidth, _pixelHeight),
-            GridOffset = new Vector2(HorizontalPadding, 0),
+            GridOffset = new Vector2(paddingPx, 0),
             CursorAlpha = cursorAlpha,
             BellAlpha = bellAlpha,
         };
