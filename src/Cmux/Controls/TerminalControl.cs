@@ -1204,11 +1204,10 @@ public class TerminalControl : FrameworkElement
         var pos = GetMousePos(e);
 
         // Scrollbar click/drag — check before cell hit-testing
-        // Hit area is wider (20px) than the visual scrollbar (6px) for easier grabbing
+        // Hit area is wider than the visual scrollbar (10px) for easier grabbing
         if (_session != null && _session.Buffer.ScrollbackCount > 0)
         {
-            // Generous hit area — rightmost 60 DIPs of the terminal
-            double hitX = ActualWidth - 60;
+            double hitX = ActualWidth - 20;
             if (pos.X >= hitX)
             {
                 int scrollbackCount = _session.Buffer.ScrollbackCount;
