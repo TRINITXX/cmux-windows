@@ -665,6 +665,66 @@ public class DaemonClientTests
     }
 }
 
+public class WaitForPromptTests
+{
+    [Fact]
+    public async Task WaitForPrompt_ReturnsTrue_WhenMarkerFires()
+    {
+        var session = new TerminalSession("test-pane", 80, 24);
+        var tcs = new TaskCompletionSource<bool>();
+
+        void handler(char marker, string? payload)
+        {
+            if (marker == 'A')
+            {
+                session.ShellPromptMarker -= handler;
+                tcs.TrySetResult(true);
+            }
+        }
+        session.ShellPromptMarker += handler;
+
+        // Simulate prompt marker after short delay
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(100);
+            // Feed OSC 133;A sequence: ESC ] 133;A BEL
+            session.FeedOutput(Encoding.ASCII.GetBytes("\x1b]133;A\x07"));
+        });
+
+        var result = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task WaitForPrompt_ReturnsFalse_OnTimeout()
+    {
+        var session = new TerminalSession("test-pane-timeout", 80, 24);
+        var tcs = new TaskCompletionSource<bool>();
+
+        void handler(char marker, string? payload)
+        {
+            if (marker == 'A')
+            {
+                session.ShellPromptMarker -= handler;
+                tcs.TrySetResult(true);
+            }
+        }
+        session.ShellPromptMarker += handler;
+
+        // Timeout fallback — use CancellationTokenSource for reliable timeout
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        cts.Token.Register(() =>
+        {
+            session.ShellPromptMarker -= handler;
+            tcs.TrySetResult(false);
+        });
+
+        // Don't feed any data — should timeout
+        var result = await tcs.Task;
+        result.Should().BeFalse();
+    }
+}
+
 public class AgentConversationStoreMessageParsingTests
 {
     private static readonly MethodInfo ReadMessagesMethod = typeof(AgentConversationStoreService)

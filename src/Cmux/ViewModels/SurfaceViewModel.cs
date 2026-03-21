@@ -169,30 +169,59 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         _ = Task.Run(async () =>
         {
-            // Wait for daemon connection — use await instead of .Wait() to avoid ThreadPool starvation
+            // Wait for daemon connection
             try { await App.DaemonConnectTask.WaitAsync(TimeSpan.FromSeconds(10)); } catch { }
 
             // Only relaunch if daemon has no existing sessions (fresh boot / daemon restart).
             // If daemon had active sessions, they are still alive — no resume needed.
             if (!App.NeedClaudeResume) return;
 
-            // Wait for shell prompts to be ready
-            await Task.Delay(1500);
-
-            // Relaunch Claude Code in each pane with --resume
+            // Relaunch Claude Code in each pane after detecting shell prompt
             foreach (var (paneId, sessionId) in claudePanes)
             {
+                var promptReady = await WaitForShellPromptMarker(paneId, timeout: TimeSpan.FromSeconds(10));
+                if (!promptReady)
+                {
+                    App.DaemonLog($"[RelaunchClaude:{paneId}] Prompt not detected within 10s, skipping");
+                    continue;
+                }
+
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
                     var cmd = "claude --dangerously-skip-permissions --effort max";
-                    cmd += string.IsNullOrWhiteSpace(sessionId)
-                        ? " --resume"
-                        : $" --resume {sessionId}";
+                    if (!string.IsNullOrWhiteSpace(sessionId))
+                        cmd += $" --resume {sessionId}";
                     SendCommandToPane(paneId, cmd);
                 });
-                await Task.Delay(200);
+                await Task.Delay(200); // Small gap between panes
             }
         });
+    }
+
+    private Task<bool> WaitForShellPromptMarker(string paneId, TimeSpan timeout)
+    {
+        if (!_sessions.TryGetValue(paneId, out var session))
+            return Task.FromResult(false);
+
+        var tcs = new TaskCompletionSource<bool>();
+        void handler(char marker, string? payload)
+        {
+            if (marker == 'A') // OSC 133;A = prompt start
+            {
+                session.ShellPromptMarker -= handler;
+                tcs.TrySetResult(true);
+            }
+        }
+        session.ShellPromptMarker += handler;
+
+        // Timeout fallback
+        _ = Task.Delay(timeout).ContinueWith(_ =>
+        {
+            session.ShellPromptMarker -= handler;
+            tcs.TrySetResult(false);
+        });
+
+        return tcs.Task;
     }
 
     private void OnDaemonRawOutput(string paneId, byte[] data)
