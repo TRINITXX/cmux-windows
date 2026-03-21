@@ -45,9 +45,7 @@ public class TerminalControl : FrameworkElement
     private static readonly string FontFallbacks = ", Segoe UI Symbol, Segoe UI Emoji, Arial Unicode MS";
     private bool _followOutput = true;
     private int _lastScrollbackCount;
-#pragma warning disable CS0414 // assigned but never read — kept for RequestRender callers
     private volatile bool _needsRender;
-#pragma warning restore CS0414
     private bool _scrollbarDragging;
 
     private string _cursorStyle = "bar";
@@ -482,6 +480,14 @@ public class TerminalControl : FrameworkElement
             _gpuInitialized = _gpuRenderer != null;
         }
         if (_gpuRenderer == null || !_gpuRenderer.IsInitialized) return;
+
+        // Skip rendering when nothing has changed and no animation is active.
+        // This prevents DWM from recompositing the desktop every 16ms (~60fps),
+        // which causes visible brightness flickering on the entire screen.
+        bool bellActive = DateTime.UtcNow < _bellFlashUntil;
+        if (!_needsRender && !bellActive)
+            return;
+        _needsRender = false;
 
         // Ensure swap chain dimensions match current control size.
         {
