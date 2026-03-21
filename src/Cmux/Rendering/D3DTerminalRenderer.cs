@@ -137,7 +137,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
             TextureAddressMode.Clamp));
 
         // 7. Create atlas and cell buffer
-        _atlas = new GlyphAtlas(_device, _context, fontFamily, fontSize, dpi);
+        _atlas = new GlyphAtlas(_device, _context, fontFamily, fontSize, dpi,
+            (int)Math.Ceiling(cellWidth * dpi), (int)Math.Ceiling(cellHeight * dpi));
         _cellBuffer = new CellBuffer(_device, cols, rows);
     }
 
@@ -373,7 +374,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
         _cellWidth = cellWidth;
         _cellHeight = cellHeight;
 
-        _atlas?.Invalidate(fontSize, dpi, fontFamily);
+        _atlas?.Invalidate(fontSize, dpi, fontFamily,
+            (int)Math.Ceiling(cellWidth * dpi), (int)Math.Ceiling(cellHeight * dpi));
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

@@ -85,6 +85,9 @@ internal sealed class GlyphAtlas : IDisposable
     private float  _fontSize;
     private float  _pixelsPerDip;
     private string _fontFamily;
+    private int    _cellWidthPx;
+    private int    _cellHeightPx;
+    private float  _ascent; // baseline offset from cell top, in device pixels
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -103,7 +106,9 @@ internal sealed class GlyphAtlas : IDisposable
         ID3D11DeviceContext context,
         string              fontFamily   = "Cascadia Code",
         float               fontSize     = 14f,
-        float               pixelsPerDip = 1f)
+        float               pixelsPerDip = 1f,
+        int                 cellWidthPx  = 0,
+        int                 cellHeightPx = 0)
     {
         _device       = device;
         _context      = context;
@@ -112,6 +117,23 @@ internal sealed class GlyphAtlas : IDisposable
         _pixelsPerDip = pixelsPerDip;
 
         InitializeDirectWrite();
+
+        // Compute cell pixel dimensions from font metrics if not provided
+        if (cellWidthPx > 0 && cellHeightPx > 0)
+        {
+            _cellWidthPx = cellWidthPx;
+            _cellHeightPx = cellHeightPx;
+        }
+        else
+        {
+            ComputeCellDimensions();
+        }
+
+        // Compute baseline (ascent) from font metrics
+        var metrics = _fontFaces[0].Metrics;
+        float designToPixel = _fontSize * _pixelsPerDip / metrics.DesignUnitsPerEm;
+        _ascent = metrics.Ascent * designToPixel;
+
         CreateAtlasTexture();
     }
 
@@ -139,7 +161,8 @@ internal sealed class GlyphAtlas : IDisposable
     /// Invalidates the atlas after a font-size or DPI change.
     /// The next call to <see cref="GetOrRasterize"/> will rasterize into a fresh atlas.
     /// </summary>
-    public void Invalidate(float? newFontSize = null, float? newPixelsPerDip = null, string? newFontFamily = null)
+    public void Invalidate(float? newFontSize = null, float? newPixelsPerDip = null, string? newFontFamily = null,
+        int cellWidthPx = 0, int cellHeightPx = 0)
     {
         if (newFontSize    != null) _fontSize     = newFontSize.Value;
         if (newPixelsPerDip != null) _pixelsPerDip = newPixelsPerDip.Value;
@@ -150,12 +173,36 @@ internal sealed class GlyphAtlas : IDisposable
             ResolveFontFaces();
         }
 
+        if (cellWidthPx > 0) _cellWidthPx = cellWidthPx;
+        if (cellHeightPx > 0) _cellHeightPx = cellHeightPx;
+
+        // Recompute ascent
+        var metrics = _fontFaces[0].Metrics;
+        float designToPixel = _fontSize * _pixelsPerDip / metrics.DesignUnitsPerEm;
+        _ascent = metrics.Ascent * designToPixel;
+
         ClearAtlas();
     }
 
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
+
+    private void ComputeCellDimensions()
+    {
+        var metrics = _fontFaces[0].Metrics;
+        float designToPixel = _fontSize * _pixelsPerDip / metrics.DesignUnitsPerEm;
+        _cellHeightPx = (int)Math.Ceiling((metrics.Ascent + metrics.Descent + metrics.LineGap) * designToPixel);
+        // For monospace, use average advance width
+        var glyphIndices = _fontFaces[0].GetGlyphIndices(new uint[] { 'M' });
+        if (glyphIndices.Length > 0)
+        {
+            var glyphMetrics = _fontFaces[0].GetDesignGlyphMetrics(glyphIndices, false);
+            if (glyphMetrics.Length > 0)
+                _cellWidthPx = (int)Math.Ceiling(glyphMetrics[0].AdvanceWidth * designToPixel);
+        }
+        if (_cellWidthPx <= 0) _cellWidthPx = _cellHeightPx / 2; // fallback
+    }
 
     private void InitializeDirectWrite()
     {
@@ -283,17 +330,18 @@ internal sealed class GlyphAtlas : IDisposable
             return empty;
         }
 
-        // Advance atlas cursor; rebuild if out of space.
-        if (_cursorX + glyphW + Padding > AtlasWidth)
+        // Advance atlas cursor — use CELL-sized slots (not tight glyph bounds).
+        // This ensures the shader's UV mapping (which covers the full cell quad)
+        // doesn't stretch the glyph.
+        if (_cursorX + _cellWidthPx + Padding > AtlasWidth)
         {
             _cursorX   = 0;
             _cursorY  += _rowHeight + Padding;
             _rowHeight  = 0;
         }
 
-        if (_cursorY + glyphH + Padding > AtlasHeight)
+        if (_cursorY + _cellHeightPx + Padding > AtlasHeight)
         {
-            // Atlas full — clear everything and start over.
             ClearAtlas();
         }
 
@@ -302,24 +350,47 @@ internal sealed class GlyphAtlas : IDisposable
         var ctBuffer    = new byte[ctByteCount];
         analysis.CreateAlphaTexture(TextureType.Cleartype3x1, bounds, ctBuffer, (uint)ctByteCount);
 
-        // Convert to BGRA (4 bytes per pixel). DirectWrite ClearType gives RGB order.
-        var bgraBuffer = ConvertCleartypeToBgra(ctBuffer, glyphW, glyphH);
+        // Convert to BGRA (4 bytes per pixel).
+        var glyphBgra = ConvertCleartypeToBgra(ctBuffer, glyphW, glyphH);
 
-        // Upload to atlas texture.
-        UploadGlyphToAtlas(bgraBuffer, glyphW, glyphH, _cursorX, _cursorY);
+        // Blit the glyph into a cell-sized BGRA buffer at the correct position.
+        // The glyph is positioned relative to the baseline (ascent from cell top).
+        int destX = Math.Max(0, bounds.Left);
+        int destY = Math.Max(0, (int)_ascent + bounds.Top);
+        var cellBgra = new byte[_cellWidthPx * _cellHeightPx * 4]; // zeroed = transparent
 
-        // Compute UV coordinates.
-        float u0 = _cursorX             / (float)AtlasWidth;
-        float v0 = _cursorY             / (float)AtlasHeight;
-        float u1 = (_cursorX + glyphW)  / (float)AtlasWidth;
-        float v1 = (_cursorY + glyphH)  / (float)AtlasHeight;
+        for (int row = 0; row < glyphH; row++)
+        {
+            int cellRow = destY + row;
+            if (cellRow < 0 || cellRow >= _cellHeightPx) continue;
+            for (int col = 0; col < glyphW; col++)
+            {
+                int cellCol = destX + col;
+                if (cellCol < 0 || cellCol >= _cellWidthPx) continue;
+                int srcIdx = (row * glyphW + col) * 4;
+                int dstIdx = (cellRow * _cellWidthPx + cellCol) * 4;
+                cellBgra[dstIdx]     = glyphBgra[srcIdx];
+                cellBgra[dstIdx + 1] = glyphBgra[srcIdx + 1];
+                cellBgra[dstIdx + 2] = glyphBgra[srcIdx + 2];
+                cellBgra[dstIdx + 3] = glyphBgra[srcIdx + 3];
+            }
+        }
 
-        var info = new GlyphInfo(u0, v0, u1, v1, glyphW, glyphH, bounds.Left, bounds.Top);
+        // Upload cell-sized buffer to atlas.
+        UploadGlyphToAtlas(cellBgra, _cellWidthPx, _cellHeightPx, _cursorX, _cursorY);
+
+        // UV covers the full cell slot.
+        float u0 = _cursorX                    / (float)AtlasWidth;
+        float v0 = _cursorY                    / (float)AtlasHeight;
+        float u1 = (_cursorX + _cellWidthPx)   / (float)AtlasWidth;
+        float v1 = (_cursorY + _cellHeightPx)  / (float)AtlasHeight;
+
+        var info = new GlyphInfo(u0, v0, u1, v1, _cellWidthPx, _cellHeightPx, bounds.Left, bounds.Top);
         _cache[key] = info;
 
-        // Advance cursor.
-        _cursorX  += glyphW + Padding;
-        if (glyphH > _rowHeight) _rowHeight = glyphH;
+        // Advance cursor by cell size.
+        _cursorX  += _cellWidthPx + Padding;
+        if (_cellHeightPx > _rowHeight) _rowHeight = _cellHeightPx;
 
         return info;
     }
