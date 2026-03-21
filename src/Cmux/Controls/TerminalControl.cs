@@ -31,6 +31,7 @@ public class TerminalControl : FrameworkElement
     private D3DRenderHost? _renderHost;
     private D3DTerminalRenderer? _gpuRenderer;
     private bool _gpuInitialized;
+
     private Point? _rawMousePosition; // Mouse position from Win32 lParam (WPF DIPs)
     private double _cellWidth;
     private double _cellHeight;
@@ -44,11 +45,17 @@ public class TerminalControl : FrameworkElement
     private static readonly string FontFallbacks = ", Segoe UI Symbol, Segoe UI Emoji, Arial Unicode MS";
     private bool _followOutput = true;
     private int _lastScrollbackCount;
+#pragma warning disable CS0414 // assigned but never read — kept for RequestRender callers
     private volatile bool _needsRender;
+#pragma warning restore CS0414
     private bool _scrollbarDragging;
 
     private string _cursorStyle = "bar";
     private bool _cursorBlink = true;
+
+    // Render timer — fires at ~60fps independently of WPF's render schedule
+    // to prevent the D3D11 swap chain from going stale (black screen).
+    private System.Windows.Threading.DispatcherTimer? _renderTimer;
 
     // Cursor blink timer
     private System.Windows.Threading.DispatcherTimer? _cursorTimer;
@@ -79,8 +86,26 @@ public class TerminalControl : FrameworkElement
 
     private bool _suppressNextEnterTextInput;
 
-    // Dirty-tracking for full redraws (selection, search, URL hover, resize)
+#pragma warning disable CS0414
     private bool _forceFullRedraw;
+#pragma warning restore CS0414
+
+    /// <summary>
+    /// Converts a mouse position (WPF DIPs) to grid cell coordinates using the
+    /// same pixel-rounded math as the GPU renderer, preventing progressive offset.
+    /// </summary>
+    private (int col, int row) PixelToCell(Point posDips)
+    {
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        int cellWPx = (int)Math.Round(_cellWidth * dpi);
+        int cellHPx = (int)Math.Round(_cellHeight * dpi);
+        double padPx = Math.Round(HorizontalPadding * dpi);
+        if (cellWPx <= 0) cellWPx = 1;
+        if (cellHPx <= 0) cellHPx = 1;
+        int col = Math.Clamp((int)((posDips.X * dpi - padPx) / cellWPx), 0, _cols - 1);
+        int row = Math.Clamp((int)(posDips.Y * dpi / cellHPx), 0, _rows - 1);
+        return (col, row);
+    }
 
     /// <summary>Fired when the pane wants focus.</summary>
     public event Action? FocusRequested;
@@ -310,8 +335,23 @@ public class TerminalControl : FrameworkElement
             _renderHost.RawInput += OnRenderHostRawInput;
         }
 
-        CompositionTarget.Rendering -= OnCompositionTargetRendering;
-        CompositionTarget.Rendering += OnCompositionTargetRendering;
+        // Use a DispatcherTimer instead of CompositionTarget.Rendering.
+        // CompositionTarget.Rendering stops firing when WPF has no visual
+        // changes, causing the D3D11 swap chain to go stale (black screen).
+        if (_renderTimer == null)
+        {
+            _renderTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(16),
+            };
+            _renderTimer.Tick += OnRenderTimerTick;
+        }
+        _renderTimer.Start();
+    }
+
+    private void OnRenderTimerTick(object? sender, EventArgs e)
+    {
+        OnCompositionTargetRendering(sender, e);
     }
 
     /// <summary>
@@ -405,42 +445,92 @@ public class TerminalControl : FrameworkElement
 
     private void OnControlUnloaded(object sender, RoutedEventArgs e)
     {
-        CompositionTarget.Rendering -= OnCompositionTargetRendering;
+        _renderTimer?.Stop();
         _gpuRenderer?.Dispose();
         _gpuRenderer = null;
-        _renderHost?.Dispose();
+        // Do NOT dispose _renderHost here — its HWND must survive Loaded/Unloaded
+        // cycles. Disposing it destroys the HWND, and a disposed HwndHost won't
+        // recreate it when re-added to the visual tree (causing permanent black screen).
         _gpuInitialized = false;
     }
 
     private void OnCompositionTargetRendering(object? sender, EventArgs e)
     {
-        if (!_needsRender && !_forceFullRedraw) return;
-        _needsRender = false;
         if (_session == null) return;
+
+        // Detect dead renderer (disposed by HandleDeviceLost) and force reinitialization
+        if (_gpuRenderer != null && !_gpuRenderer.IsInitialized)
+        {
+            _gpuRenderer.Dispose();
+            _gpuRenderer = null;
+            _gpuInitialized = false;
+        }
 
         // Lazy GPU init
         if (!_gpuInitialized && _renderHost?.Hwnd != nint.Zero)
         {
-            InitializeGpuRenderer();
+            try
+            {
+                InitializeGpuRenderer();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GPU] InitializeGpuRenderer failed: {ex.Message}");
+                _gpuRenderer?.Dispose();
+                _gpuRenderer = null;
+            }
             _gpuInitialized = _gpuRenderer != null;
         }
         if (_gpuRenderer == null || !_gpuRenderer.IsInitialized) return;
+
+        // Ensure swap chain dimensions match current control size.
+        {
+            var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            int expectedW = (int)(ActualWidth * dpi);
+            int expectedH = (int)(ActualHeight * dpi);
+            if (expectedW > 0 && expectedH > 0 &&
+                (expectedW != _gpuRenderer.PixelWidth || expectedH != _gpuRenderer.PixelHeight))
+            {
+                try
+                {
+                    _gpuRenderer.ResizeSwapChain(expectedW, expectedH, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GPU] Dimension fix resize failed: {ex.Message}");
+                    _gpuRenderer.Dispose();
+                    _gpuRenderer = null;
+                    _gpuInitialized = false;
+                    return;
+                }
+            }
+        }
 
         float cursorAlpha = (_cursorVisible || !_cursorBlink) && IsPaneFocused ? 1f : 0f;
         float bellAlpha = DateTime.UtcNow < _bellFlashUntil
             ? (float)(_bellFlashUntil - DateTime.UtcNow).TotalMilliseconds / 150f
             : 0f;
 
-        // Pass _scrollOffset directly — IsSelected already adds scrollbackCount
-        // internally. The old WPF code did the same: scrollOffset = virtualLine - scrollbackCount - visRow = _scrollOffset.
         int scrollbackOffset = _scrollOffset;
 
-        _gpuRenderer.Render(
-            _session, _scrollOffset, _rows,
-            cursorAlpha, bellAlpha,
-            _selection, scrollbackOffset,
-            _searchMatchSetCache, _currentMatchSetCache,
-            _hoveredUrl, _cursorStyle, _cursorVisible);
+        try
+        {
+            _gpuRenderer.Render(
+                _session, _scrollOffset, _rows,
+                cursorAlpha, bellAlpha,
+                _selection, scrollbackOffset,
+                _searchMatchSetCache, _currentMatchSetCache,
+                _hoveredUrl, _cursorStyle, _cursorVisible);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GPU] Render failed, reinitializing: {ex.Message}");
+            _gpuRenderer.Dispose();
+            _gpuRenderer = null;
+            _gpuInitialized = false;
+            _needsRender = true;
+            return;
+        }
 
         _forceFullRedraw = false;
     }
@@ -481,7 +571,7 @@ public class TerminalControl : FrameworkElement
     {
         if (ActualWidth <= 0 || ActualHeight <= 0 || _cellWidth <= 0 || _cellHeight <= 0) return;
 
-        int cols = Math.Max(1, (int)((ActualWidth - 2 * HorizontalPadding) / _cellWidth));
+        int cols = Math.Max(1, (int)((ActualWidth - HorizontalPadding - 10) / _cellWidth));
         int rows = Math.Max(1, (int)(ActualHeight / _cellHeight));
 
         if (cols != _cols || rows != _rows)
@@ -1111,9 +1201,8 @@ public class TerminalControl : FrameworkElement
         // Hit area is wider (20px) than the visual scrollbar (6px) for easier grabbing
         if (_session != null && _session.Buffer.ScrollbackCount > 0)
         {
-            const double scrollbarHitWidth = 20;
-            const double scrollbarMargin = 2;
-            double hitX = ActualWidth - scrollbarHitWidth - scrollbarMargin;
+            // Generous hit area — rightmost 60 DIPs of the terminal
+            double hitX = ActualWidth - 60;
             if (pos.X >= hitX)
             {
                 int scrollbackCount = _session.Buffer.ScrollbackCount;
@@ -1135,8 +1224,7 @@ public class TerminalControl : FrameworkElement
             }
         }
 
-        int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
-        int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
+        var (col, row) = PixelToCell(pos);
 
         // Ctrl+Click for URL opening
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && _hoveredUrl.HasValue)
@@ -1203,8 +1291,7 @@ public class TerminalControl : FrameworkElement
             return;
         }
 
-        int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
-        int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
+        var (col, row) = PixelToCell(pos);
 
         // URL detection (Ctrl held) — cache scanned URLs per row
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && _session != null && row < _session.Buffer.Rows)

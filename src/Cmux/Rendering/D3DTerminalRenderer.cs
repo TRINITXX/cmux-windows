@@ -28,6 +28,10 @@ internal sealed class D3DTerminalRenderer : IDisposable
         public Vector2 GridOffset;
         public float CursorAlpha;
         public float BellAlpha;
+        public float ScrollbarThumbTop;    // normalized 0..1 within viewport
+        public float ScrollbarThumbHeight; // normalized 0..1
+        public float ScrollbarAlpha;       // 0 = hidden, >0 = thumb opacity
+        public float _scrollPad;           // padding to 16-byte alignment
     }
 
     // ── D3D11 / DXGI objects ────────────────────────────────────────
@@ -63,8 +67,12 @@ internal sealed class D3DTerminalRenderer : IDisposable
     // Atlas texture is always 2048x2048 (matches GlyphAtlas internal constant).
     private const float AtlasSize = 2048f;
 
-    /// <summary>Whether the renderer has been successfully initialized.</summary>
-    public bool IsInitialized => _device != null;
+    /// <summary>Whether the renderer has been successfully initialized and is not disposed.</summary>
+    public bool IsInitialized => _device != null && !_disposed;
+
+    /// <summary>Current swap chain pixel dimensions (for mismatch detection).</summary>
+    public int PixelWidth => _pixelWidth;
+    public int PixelHeight => _pixelHeight;
 
     // ── Initialization ──────────────────────────────────────────────
 
@@ -112,7 +120,7 @@ internal sealed class D3DTerminalRenderer : IDisposable
             Stereo = false,
             SampleDescription = new SampleDescription(1, 0),
             BufferUsage = Usage.RenderTargetOutput,
-            BufferCount = 2,
+            BufferCount = 3, // Triple-buffer: avoids 30fps cliff when mouse input adds overhead
             Scaling = Scaling.None,
             SwapEffect = SwapEffect.FlipDiscard,
             AlphaMode = AlphaMode.Ignore,
@@ -162,22 +170,36 @@ internal sealed class D3DTerminalRenderer : IDisposable
         string cursorStyle, bool cursorVisible)
     {
         if (_disposed || _device == null || _context == null ||
-            _swapChain == null || _rtv == null ||
-            _atlas == null || _cellBuffer == null)
+            _swapChain == null || _atlas == null || _cellBuffer == null)
             return;
 
+        // Recover from null RTV (CreateRenderTarget failed previously)
+        if (_rtv == null)
+        {
+            try { CreateRenderTarget(); }
+            catch
+            {
+                Debug.WriteLine("[D3DTerminalRenderer] RTV recovery failed — requesting full recreation");
+                _disposed = true;
+                return;
+            }
+        }
+
         var buffer = session.Buffer;
-        int scrollbackCount = buffer.ScrollbackCount;
-        int viewStartLine = scrollbackCount + scrollOffset;
 
         // ── Populate CellBuffer under render lock ───────────────────
+        // scrollbackCount MUST be captured inside the lock to match the buffer state
+        int renderScrollbackCount = 0;
         lock (session.RenderLock)
         {
+            renderScrollbackCount = buffer.ScrollbackCount;
+            int viewStartLine = renderScrollbackCount + scrollOffset;
+
             for (int visRow = 0; visRow < _rows; visRow++)
             {
                 int virtualLine = viewStartLine + visRow;
-                bool isScrollback = virtualLine < scrollbackCount;
-                int bufferRow = virtualLine - scrollbackCount;
+                bool isScrollback = virtualLine < renderScrollbackCount;
+                int bufferRow = virtualLine - renderScrollbackCount;
 
                 TerminalCell[]? scrollbackLine = null;
                 if (isScrollback)
@@ -225,7 +247,7 @@ internal sealed class D3DTerminalRenderer : IDisposable
 
                     // Selection
                     if (selection.HasSelection &&
-                        selection.IsSelected(visRow, col, scrollbackOffset, scrollbackCount))
+                        selection.IsSelected(visRow, col, scrollbackOffset, renderScrollbackCount))
                         flags |= CellData.FLAG_SELECTED;
 
                     // Search highlights
@@ -239,20 +261,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
                         visRow == url.row && col >= url.startCol && col <= url.endCol)
                         flags |= CellData.FLAG_URL_HOVER;
 
-                    // Cursor
+                    // Cursor disabled in GPU renderer
                     uint cStyle = 0;
-                    if (!isScrollback && bufferRow == buffer.CursorRow &&
-                        col == buffer.CursorCol && cursorVisible)
-                    {
-                        flags |= CellData.FLAG_CURSOR;
-                        cStyle = (cursorStyle ?? "bar").ToLowerInvariant() switch
-                        {
-                            "block"     => 1,
-                            "bar"       => 2,
-                            "underline" => 3,
-                            _           => 2,
-                        };
-                    }
 
                     // Use theme background for default-bg cells so the terminal
                     // interior matches the theme color (not black).
@@ -284,6 +294,21 @@ internal sealed class D3DTerminalRenderer : IDisposable
         // Use the same integer pixel sizes as the atlas to prevent mismatches.
         float paddingPx = MathF.Round(HorizontalPadding * _dpi);
 
+        // Scrollbar position (normalized 0..1)
+        float sbThumbTop = 0f, sbThumbHeight = 0f, sbAlpha = 0f;
+        int sbScrollback = renderScrollbackCount;
+        if (sbScrollback > 0)
+        {
+            int sbTotal = sbScrollback + _rows;
+            float thumbRatio = (float)_rows / sbTotal;
+            sbThumbHeight = MathF.Max(20f / _pixelHeight, thumbRatio);
+            int sbViewStart = sbScrollback + scrollOffset;
+            float scrollFraction = (float)sbViewStart / MathF.Max(1, sbTotal - _rows);
+            sbThumbTop = scrollFraction * (1f - sbThumbHeight);
+            // Brighter when scrolled back, subtle when at bottom
+            sbAlpha = scrollOffset < 0 ? 0.47f : 0.24f;
+        }
+
         var constants = new ConstantBufferData
         {
             CellSize = new Vector2(_cellWidthPx, _cellHeightPx),
@@ -293,6 +318,9 @@ internal sealed class D3DTerminalRenderer : IDisposable
             GridOffset = new Vector2(paddingPx, 0),
             CursorAlpha = cursorAlpha,
             BellAlpha = bellAlpha,
+            ScrollbarThumbTop = sbThumbTop,
+            ScrollbarThumbHeight = sbThumbHeight,
+            ScrollbarAlpha = sbAlpha,
         };
 
         var mapped = _context.Map(_constantBuffer!, MapMode.WriteDiscard);
@@ -306,7 +334,7 @@ internal sealed class D3DTerminalRenderer : IDisposable
         }
 
         // Set pipeline state
-        _context.OMSetRenderTargets(_rtv);
+        _context.OMSetRenderTargets(_rtv!);
         _context.RSSetViewport(0, 0, _pixelWidth, _pixelHeight);
 
         // Clear with background color
@@ -331,12 +359,23 @@ internal sealed class D3DTerminalRenderer : IDisposable
         // Single instanced draw call for the entire grid
         _context.DrawInstanced(6, (uint)_cellBuffer.CellCount, 0, 0);
 
-        // Present with VSync
-        var hr = _swapChain.Present(1, PresentFlags.None);
-        if (hr == Vortice.DXGI.ResultCode.DeviceRemoved ||
-            hr == Vortice.DXGI.ResultCode.DeviceReset)
+        // Present immediately (DWM handles VSync for FlipDiscard)
+        try
         {
-            HandleDeviceLost();
+            var hr = _swapChain.Present(0, PresentFlags.None);
+
+            // Any DXGI failure (not just DeviceRemoved/Reset) means the swap
+            // chain or device is in a bad state — force full recreation.
+            if (hr.Failure)
+            {
+                Debug.WriteLine($"[D3DTerminalRenderer] Present failed (hr=0x{hr.Code:X8}) — requesting full recreation");
+                _disposed = true;
+            }
+        }
+        catch (SharpGenException ex)
+        {
+            Debug.WriteLine($"[D3DTerminalRenderer] Present threw (hr=0x{ex.HResult:X8}) — requesting full recreation");
+            _disposed = true;
         }
     }
 
@@ -392,15 +431,27 @@ internal sealed class D3DTerminalRenderer : IDisposable
     private void CreateRenderTarget()
     {
         _rtv?.Dispose();
+        _rtv = null; // Prevent use of disposed RTV if recreation fails
         using var backBuffer = _swapChain!.GetBuffer<ID3D11Texture2D>(0);
         _rtv = _device!.CreateRenderTargetView(backBuffer);
     }
 
     private void HandleDeviceLost()
     {
-        // Full teardown and recreation would happen here.
-        // For now, log and let the next frame retry.
-        Debug.WriteLine("[D3DTerminalRenderer] Device lost, needs recreation");
+        // Recreate render target — most common recovery for device lost
+        try
+        {
+            _rtv?.Dispose();
+            _rtv = null;
+            CreateRenderTarget();
+            Debug.WriteLine("[D3DTerminalRenderer] Device lost — render target recreated");
+        }
+        catch
+        {
+            // Full device loss — mark as disposed so TerminalControl recreates us
+            Debug.WriteLine("[D3DTerminalRenderer] Device lost — full recreation needed");
+            _disposed = true;
+        }
     }
 
     private static TerminalCell GetCell(

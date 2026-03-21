@@ -79,6 +79,14 @@ internal sealed class CellBuffer : IDisposable
     }
 
     /// <summary>
+    /// Zeroes all cells in the CPU-side staging array, preventing stale data artifacts.
+    /// </summary>
+    public void Clear()
+    {
+        Array.Clear(_cpuData);
+    }
+
+    /// <summary>
     /// Writes a cell into the CPU-side staging array.
     /// </summary>
     public void SetCell(int row, int col, in CellData data)

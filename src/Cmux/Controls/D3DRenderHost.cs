@@ -50,6 +50,21 @@ internal sealed class D3DRenderHost : HwndHost
 
     protected override nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
     {
+        // Suppress background erase — D3D11 swap chain handles all painting
+        if (msg == 0x0014) // WM_ERASEBKGND
+        {
+            handled = true;
+            return 1;
+        }
+
+        // Validate dirty region without GDI painting — swap chain covers the entire surface
+        if (msg == 0x000F) // WM_PAINT
+        {
+            ValidateRect(hwnd, nint.Zero);
+            handled = true;
+            return nint.Zero;
+        }
+
         if (IsInputMessage(msg) && RawInput != null)
         {
             RawInput.Invoke(msg, wParam, lParam);
@@ -94,6 +109,9 @@ internal sealed class D3DRenderHost : HwndHost
 
     [DllImport("user32.dll")]
     private static extern bool DestroyWindow(nint hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ValidateRect(nint hwnd, nint lpRect);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern short RegisterClassEx(ref WNDCLASSEX wc);

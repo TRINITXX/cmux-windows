@@ -14,6 +14,10 @@ cbuffer TerminalConstants : register(b0)
     float2 gridOffset;    // left/top padding in pixels (e.g. 20px left margin)
     float  cursorAlpha;   // 0..1 for cursor blink
     float  bellAlpha;     // 0..1 for visual bell flash
+    float  scrollbarThumbTop;    // normalized 0..1 thumb position
+    float  scrollbarThumbHeight; // normalized 0..1 thumb size
+    float  scrollbarAlpha;       // 0 = hidden, >0 = thumb opacity
+    float  _scrollPad;
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +135,15 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
                     + float2((float)col * cellSize.x, (float)row * cellSize.y)
                     + corner * float2(cellW, cellH);
 
+    // Extend last column's right edge to viewport edge (scrollbar gutter).
+    // Only extends the position, not the UV — pixel shader skips glyph in gutter.
+    if (col == (uint)gridSize.x - 1 && corner.x > 0.5)
+    {
+        float gridRight = gridOffset.x + gridSize.x * cellSize.x;
+        if (viewportSize.x > gridRight)
+            pixelPos.x = viewportSize.x;
+    }
+
     // Snap to integer pixel boundaries to prevent sub-pixel gaps between cells
     pixelPos = floor(pixelPos + 0.5);
 
@@ -162,11 +175,16 @@ float4 PSMain(VSOutput i) : SV_Target
 {
     float4 color = i.bg;
 
+    // Detect gutter zone (pixels beyond the cell grid, used for scrollbar)
+    float gridRight = gridOffset.x + gridSize.x * cellSize.x;
+    bool inGutter = (i.pos.x >= gridRight);
+
     // ------------------------------------------------------------------
     // 1. Glyph rendering with gamma-correct ClearType blending
+    //    Skip in gutter zone to prevent glyph stretching
     // ------------------------------------------------------------------
     bool hasGlyph = any(i.atlasUV > 0.001);
-    if (hasGlyph)
+    if (hasGlyph && !inGutter)
     {
         // R,G,B = per-channel subpixel coverage from atlas
         float3 coverage = glyphAtlas.Sample(glyphSampler, i.atlasUV).rgb;
@@ -267,7 +285,36 @@ float4 PSMain(VSOutput i) : SV_Target
     }
 
     // ------------------------------------------------------------------
-    // 9. Visual bell flash: lerp toward white
+    // 9. Scrollbar overlay (rendered on top of cells at right edge)
+    // ------------------------------------------------------------------
+    if (scrollbarAlpha > 0.0)
+    {
+        float sbWidth  = 10.0;
+        float sbLeft   = viewportSize.x - sbWidth - 1.0;
+        float px = i.pos.x;
+        float py = i.pos.y;
+
+        if (px >= sbLeft && px < sbLeft + sbWidth)
+        {
+            float thumbTop = scrollbarThumbTop * viewportSize.y;
+            float thumbBot = thumbTop + scrollbarThumbHeight * viewportSize.y;
+
+            if (py >= thumbTop && py < thumbBot)
+            {
+                // Rounded ends: fade out top/bottom 3px
+                float radius = min(3.0, scrollbarThumbHeight * viewportSize.y * 0.5);
+                float distTop = py - thumbTop;
+                float distBot = thumbBot - py;
+                float edgeFade = saturate(min(distTop, distBot) / radius);
+
+                float3 thumbColor = float3(0.7, 0.7, 0.75); // light gray
+                color.rgb = lerp(color.rgb, thumbColor, scrollbarAlpha * 0.85 * edgeFade);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 10. Visual bell flash: lerp toward white
     // ------------------------------------------------------------------
     color.rgb = lerp(color.rgb, float3(1.0, 1.0, 1.0), bellAlpha * 0.3);
 

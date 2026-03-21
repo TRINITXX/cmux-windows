@@ -281,6 +281,14 @@ internal sealed class GlyphAtlas : IDisposable
 
     private GlyphInfo RasterizeAndCache(GlyphKey key)
     {
+        // Box-drawing / block element: use pixel-perfect renderer instead of DirectWrite.
+        if (BoxDrawingRenderer.IsBoxDrawingCodepoint(key.Codepoint))
+        {
+            var boxBgra = BoxDrawingRenderer.Render(key.Codepoint, _cellWidthPx, _cellHeightPx);
+            if (boxBgra != null)
+                return CacheAndUploadCellBitmap(key, boxBgra);
+        }
+
         var fontFace = _fontFaces[(int)key.Style];
 
         // Resolve glyph index for the codepoint.
@@ -330,21 +338,6 @@ internal sealed class GlyphAtlas : IDisposable
             return empty;
         }
 
-        // Advance atlas cursor — use CELL-sized slots (not tight glyph bounds).
-        // This ensures the shader's UV mapping (which covers the full cell quad)
-        // doesn't stretch the glyph.
-        if (_cursorX + _cellWidthPx + Padding > AtlasWidth)
-        {
-            _cursorX   = 0;
-            _cursorY  += _rowHeight + Padding;
-            _rowHeight  = 0;
-        }
-
-        if (_cursorY + _cellHeightPx + Padding > AtlasHeight)
-        {
-            ClearAtlas();
-        }
-
         // Fetch ClearType alpha mask (3 bytes per pixel: R, G, B sub-pixel weights).
         int ctByteCount = glyphW * glyphH * 3;
         var ctBuffer    = new byte[ctByteCount];
@@ -376,7 +369,29 @@ internal sealed class GlyphAtlas : IDisposable
             }
         }
 
-        // Upload cell-sized buffer to atlas.
+        return CacheAndUploadCellBitmap(key, cellBgra, bounds.Left, bounds.Top);
+    }
+
+    /// <summary>
+    /// Uploads a cell-sized BGRA bitmap to the atlas and caches its UV coordinates.
+    /// Shared by both DirectWrite rasterization and pixel-perfect box-drawing rendering.
+    /// </summary>
+    private GlyphInfo CacheAndUploadCellBitmap(GlyphKey key, byte[] cellBgra,
+        int offsetX = 0, int offsetY = 0)
+    {
+        // Advance atlas cursor — use CELL-sized slots.
+        if (_cursorX + _cellWidthPx + Padding > AtlasWidth)
+        {
+            _cursorX   = 0;
+            _cursorY  += _rowHeight + Padding;
+            _rowHeight  = 0;
+        }
+
+        if (_cursorY + _cellHeightPx + Padding > AtlasHeight)
+        {
+            ClearAtlas();
+        }
+
         UploadGlyphToAtlas(cellBgra, _cellWidthPx, _cellHeightPx, _cursorX, _cursorY);
 
         // UV covers the full cell slot.
@@ -385,7 +400,7 @@ internal sealed class GlyphAtlas : IDisposable
         float u1 = (_cursorX + _cellWidthPx)   / (float)AtlasWidth;
         float v1 = (_cursorY + _cellHeightPx)  / (float)AtlasHeight;
 
-        var info = new GlyphInfo(u0, v0, u1, v1, _cellWidthPx, _cellHeightPx, bounds.Left, bounds.Top);
+        var info = new GlyphInfo(u0, v0, u1, v1, _cellWidthPx, _cellHeightPx, offsetX, offsetY);
         _cache[key] = info;
 
         // Advance cursor by cell size.
