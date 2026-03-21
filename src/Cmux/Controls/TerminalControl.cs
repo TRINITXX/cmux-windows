@@ -306,10 +306,79 @@ public class TerminalControl : FrameworkElement
         {
             AddVisualChild(_renderHost);
             AddLogicalChild(_renderHost);
+            _renderHost.RawInput += OnRenderHostRawInput;
         }
 
         CompositionTarget.Rendering -= OnCompositionTargetRendering;
         CompositionTarget.Rendering += OnCompositionTargetRendering;
+    }
+
+    /// <summary>
+    /// Translates raw Win32 mouse messages from the D3D11 child HWND into
+    /// WPF mouse coordinates and calls the appropriate handler directly.
+    /// </summary>
+    private void OnRenderHostRawInput(int msg, nint wParam, nint lParam)
+    {
+        // Extract mouse position from lParam (client coords of the child HWND)
+        int x = (short)(lParam.ToInt64() & 0xFFFF);
+        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        // Convert from device pixels to WPF DIPs
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var pos = new Point(x / dpi, y / dpi);
+
+        switch (msg)
+        {
+            case 0x0201: // WM_LBUTTONDOWN
+            {
+                Focus();
+                FocusRequested?.Invoke();
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                {
+                    RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+                };
+                OnMouseLeftButtonDown(args);
+                break;
+            }
+            case 0x0202: // WM_LBUTTONUP
+            {
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                {
+                    RoutedEvent = UIElement.MouseLeftButtonUpEvent,
+                };
+                OnMouseLeftButtonUp(args);
+                break;
+            }
+            case 0x0204: // WM_RBUTTONDOWN
+            {
+                Focus();
+                FocusRequested?.Invoke();
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.MouseRightButtonDownEvent,
+                };
+                OnMouseRightButtonDown(args);
+                break;
+            }
+            case 0x0200: // WM_MOUSEMOVE
+            {
+                var args = new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
+                {
+                    RoutedEvent = UIElement.MouseMoveEvent,
+                };
+                OnMouseMove(args);
+                break;
+            }
+            case 0x020A: // WM_MOUSEWHEEL
+            {
+                int delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+                {
+                    RoutedEvent = UIElement.MouseWheelEvent,
+                };
+                OnMouseWheel(args);
+                break;
+            }
+        }
     }
 
     private void OnControlUnloaded(object sender, RoutedEventArgs e)

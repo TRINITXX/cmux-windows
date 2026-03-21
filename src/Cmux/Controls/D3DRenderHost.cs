@@ -1,6 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Input;
 using System.Windows.Interop;
 
 namespace Cmux.Controls;
@@ -8,8 +6,8 @@ namespace Cmux.Controls;
 /// <summary>
 /// WPF HwndHost that creates a child window for Direct3D 11 rendering.
 /// The HWND is used as the target for the DXGI swap chain.
-/// Mouse/keyboard Win32 messages are translated into WPF routed events
-/// so the parent TerminalControl receives them normally.
+/// Raw Win32 mouse/keyboard messages are forwarded via the <see cref="RawInput"/> event
+/// because HwndHost's airspace prevents normal WPF event routing.
 /// </summary>
 internal sealed class D3DRenderHost : HwndHost
 {
@@ -19,10 +17,11 @@ internal sealed class D3DRenderHost : HwndHost
 
     public nint Hwnd => _hwnd;
 
-    public D3DRenderHost()
-    {
-        Focusable = true;
-    }
+    /// <summary>
+    /// Fired for every mouse/keyboard Win32 message received by the child HWND.
+    /// Parameters: (int msg, nint wParam, nint lParam).
+    /// </summary>
+    public event Action<int, nint, nint>? RawInput;
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
@@ -49,88 +48,21 @@ internal sealed class D3DRenderHost : HwndHost
         _hwnd = nint.Zero;
     }
 
-    /// <summary>
-    /// Intercept Win32 messages on the child HWND and re-raise them as WPF
-    /// routed events so they bubble up to TerminalControl.
-    /// </summary>
     protected override nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
     {
-        switch (msg)
+        if (IsInputMessage(msg) && RawInput != null)
         {
-            case WM_MOUSEWHEEL:
-            {
-                int delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
-                var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
-                {
-                    RoutedEvent = UIElement.MouseWheelEvent,
-                };
-                RaiseEvent(args);
-                handled = true;
-                return nint.Zero;
-            }
-
-            case WM_LBUTTONDOWN:
-            {
-                // Give WPF focus to this element first (fixes first-click-ignored issue)
-                Focus();
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                {
-                    RoutedEvent = UIElement.MouseLeftButtonDownEvent,
-                };
-                RaiseEvent(args);
-                handled = true;
-                return nint.Zero;
-            }
-
-            case WM_LBUTTONUP:
-            {
-                ReleaseMouseCapture();
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                {
-                    RoutedEvent = UIElement.MouseLeftButtonUpEvent,
-                };
-                RaiseEvent(args);
-                handled = true;
-                return nint.Zero;
-            }
-
-            case WM_RBUTTONDOWN:
-            {
-                Focus();
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
-                {
-                    RoutedEvent = UIElement.MouseRightButtonDownEvent,
-                };
-                RaiseEvent(args);
-                handled = true;
-                return nint.Zero;
-            }
-
-            case WM_RBUTTONUP:
-            {
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
-                {
-                    RoutedEvent = UIElement.MouseRightButtonUpEvent,
-                };
-                RaiseEvent(args);
-                handled = true;
-                return nint.Zero;
-            }
-
-            case WM_MOUSEMOVE:
-            {
-                var args = new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
-                {
-                    RoutedEvent = UIElement.MouseMoveEvent,
-                };
-                RaiseEvent(args);
-                handled = true;
-                return nint.Zero;
-            }
+            RawInput.Invoke(msg, wParam, lParam);
+            handled = true;
+            return nint.Zero;
         }
 
         return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
     }
+
+    private static bool IsInputMessage(int msg) => msg is
+        (>= 0x0200 and <= 0x020E) or // WM_MOUSEMOVE through WM_MOUSEHWHEEL
+        0x0100 or 0x0101 or 0x0102 or 0x0104 or 0x0105; // WM_KEY* and WM_CHAR
 
     private static void EnsureWindowClassRegistered()
     {
@@ -149,17 +81,9 @@ internal sealed class D3DRenderHost : HwndHost
         _classRegistered = true;
     }
 
-    // Win32 constants
     private const int WS_CHILD = 0x40000000;
     private const int WS_VISIBLE = 0x10000000;
     private const int WS_CLIPSIBLINGS = 0x04000000;
-
-    private const int WM_MOUSEMOVE = 0x0200;
-    private const int WM_LBUTTONDOWN = 0x0201;
-    private const int WM_LBUTTONUP = 0x0202;
-    private const int WM_RBUTTONDOWN = 0x0204;
-    private const int WM_RBUTTONUP = 0x0205;
-    private const int WM_MOUSEWHEEL = 0x020A;
 
     private static readonly nint DefWindowProcPtr =
         GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcW");
