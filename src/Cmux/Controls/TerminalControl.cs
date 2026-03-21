@@ -318,14 +318,28 @@ public class TerminalControl : FrameworkElement
     /// Translates raw Win32 mouse messages from the D3D11 child HWND into
     /// WPF mouse coordinates and calls the appropriate handler directly.
     /// </summary>
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ScreenToClient(nint hWnd, ref POINT lpPoint);
+
     private void OnRenderHostRawInput(int msg, nint wParam, nint lParam)
     {
-        // Extract mouse position from lParam (client coords of the child HWND)
-        int x = (short)(lParam.ToInt64() & 0xFFFF);
-        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
-        // Convert from device pixels to WPF DIPs
-        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        _rawMousePosition = new Point(x / dpi, y / dpi);
+        // Convert screen position to child HWND client coords, then to WPF DIPs.
+        // This avoids DPI double-conversion issues with PointFromScreen.
+        {
+            GetCursorPos(out var cursor);
+            var origin = PointToScreen(new Point(0, 0));
+            double localPxX = cursor.X - origin.X;
+            double localPxY = cursor.Y - origin.Y;
+            var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            var localDip = new Point(localPxX / dpi, localPxY / dpi);
+            _rawMousePosition = localDip;
+        }
 
         try
         {
@@ -417,7 +431,9 @@ public class TerminalControl : FrameworkElement
             ? (float)(_bellFlashUntil - DateTime.UtcNow).TotalMilliseconds / 150f
             : 0f;
 
-        int scrollbackOffset = _session.Buffer.ScrollbackCount + _scrollOffset;
+        // Pass _scrollOffset directly — IsSelected already adds scrollbackCount
+        // internally. The old WPF code did the same: scrollOffset = virtualLine - scrollbackCount - visRow = _scrollOffset.
+        int scrollbackOffset = _scrollOffset;
 
         _gpuRenderer.Render(
             _session, _scrollOffset, _rows,
@@ -1064,12 +1080,19 @@ public class TerminalControl : FrameworkElement
 
     /// <summary>
     /// Returns the mouse position in WPF DIPs relative to this control.
-    /// Uses the raw Win32 position when available (from HwndHost child HWND),
-    /// falls back to WPF's mouse tracking otherwise.
+    /// Always computes from Win32 GetCursorPos because WPF's mouse tracking
+    /// is stale (the HwndHost child HWND captures WM_MOUSEMOVE).
     /// </summary>
     private Point GetMousePos(MouseEventArgs e)
     {
-        return _rawMousePosition ?? e.GetPosition(this);
+        if (_rawMousePosition.HasValue)
+            return _rawMousePosition.Value;
+
+        // Fallback: always use GetCursorPos (never WPF's stale e.GetPosition)
+        GetCursorPos(out var pt);
+        var origin = PointToScreen(new Point(0, 0));
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        return new Point((pt.X - origin.X) / dpi, (pt.Y - origin.Y) / dpi);
     }
 
     // --- Mouse input ---
