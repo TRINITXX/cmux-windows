@@ -250,12 +250,15 @@ internal sealed class D3DTerminalRenderer : IDisposable
                         };
                     }
 
+                    // Use theme background for default-bg cells so the terminal
+                    // interior matches the theme color (not black).
+                    var effectiveBg = cellBg.IsDefault ? _theme.Background : bg;
+                    float bgAlpha = cellBg.IsDefault ? 1f : (isInverse ? 1f : 0.63f);
+
                     var cellData = new CellData
                     {
-                        Foreground = new Vector4(fg.R / 255f, fg.G / 255f, fg.B / 255f,
-                            cellFg.IsDefault ? 1f : 1f),
-                        Background = new Vector4(bg.R / 255f, bg.G / 255f, bg.B / 255f,
-                            cellBg.IsDefault ? 0f : (isInverse ? 1f : 0.63f)),
+                        Foreground = new Vector4(fg.R / 255f, fg.G / 255f, fg.B / 255f, 1f),
+                        Background = new Vector4(effectiveBg.R / 255f, effectiveBg.G / 255f, effectiveBg.B / 255f, bgAlpha),
                         AtlasUV = new Vector4(glyphInfo.U0, glyphInfo.V0, glyphInfo.U1, glyphInfo.V1),
                         Flags = flags,
                         CursorStyle = cStyle,
