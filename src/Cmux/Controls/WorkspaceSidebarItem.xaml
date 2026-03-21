@@ -16,6 +16,12 @@
                         <TextBlock Text="&#xE8C8;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
                     </MenuItem.Icon>
                 </MenuItem>
+                <MenuItem Header="Open in Explorer" Click="OpenInExplorer_Click">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#xED25;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                    </MenuItem.Icon>
+                </MenuItem>
+                <Separator />
                 <MenuItem Header="Set Workspace Icon" Click="SetIcon_Click">
                     <MenuItem.Icon>
                         <TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="12" />

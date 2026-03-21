@@ -16,8 +16,8 @@ public struct SelectionPoint
 
 /// <summary>
 /// Manages text selection in the terminal buffer.
-/// Supports click-to-start, drag-to-extend, double-click word select,
-/// triple-click line select, and copy-to-clipboard.
+/// Coordinates are stored as virtual line numbers (scrollback + scrollOffset + visRow)
+/// so that selection tracks content across scrolling.
 /// </summary>
 public class TerminalSelection
 {
@@ -30,17 +30,19 @@ public class TerminalSelection
 
     public event Action? SelectionChanged;
 
-    public void StartSelection(int row, int col)
+    public void StartSelection(int visRow, int col, int scrollOffset, int scrollbackCount)
     {
-        _start = new SelectionPoint(row, col);
-        _end = new SelectionPoint(row, col);
+        int virtualLine = scrollbackCount + scrollOffset + visRow;
+        _start = new SelectionPoint(virtualLine, col);
+        _end = new SelectionPoint(virtualLine, col);
         SelectionChanged?.Invoke();
     }
 
-    public void ExtendSelection(int row, int col)
+    public void ExtendSelection(int visRow, int col, int scrollOffset, int scrollbackCount)
     {
         if (!_start.HasValue) return;
-        _end = new SelectionPoint(row, col);
+        int virtualLine = scrollbackCount + scrollOffset + visRow;
+        _end = new SelectionPoint(virtualLine, col);
         SelectionChanged?.Invoke();
     }
 
@@ -69,26 +71,28 @@ public class TerminalSelection
 
     /// <summary>
     /// Tests whether a cell is within the current selection.
+    /// Converts the visual row to a virtual line for comparison with stored coordinates.
     /// </summary>
-    public bool IsSelected(int row, int col)
+    public bool IsSelected(int visRow, int col, int scrollOffset, int scrollbackCount)
     {
         var range = GetNormalizedRange();
         if (!range.HasValue) return false;
 
+        int virtualLine = scrollbackCount + scrollOffset + visRow;
         var (s, e) = range.Value;
 
-        if (row < s.Row || row > e.Row) return false;
-        if (row == s.Row && row == e.Row) return col >= s.Col && col <= e.Col;
-        if (row == s.Row) return col >= s.Col;
-        if (row == e.Row) return col <= e.Col;
+        if (virtualLine < s.Row || virtualLine > e.Row) return false;
+        if (virtualLine == s.Row && virtualLine == e.Row) return col >= s.Col && col <= e.Col;
+        if (virtualLine == s.Row) return col >= s.Col;
+        if (virtualLine == e.Row) return col <= e.Col;
         return true;
     }
 
     /// <summary>
     /// Extracts selected text from the terminal buffer.
-    /// scrollOffset is negative when scrolled back into history, 0 at bottom.
+    /// Coordinates are already virtual lines — iterate directly.
     /// </summary>
-    public string GetSelectedText(TerminalBuffer buffer, int scrollOffset = 0)
+    public string GetSelectedText(TerminalBuffer buffer)
     {
         var range = GetNormalizedRange();
         if (!range.HasValue) return "";
@@ -96,16 +100,14 @@ public class TerminalSelection
         var (s, e) = range.Value;
         var sb = new StringBuilder();
         int scrollbackCount = buffer.ScrollbackCount;
-        int viewStartLine = scrollbackCount + scrollOffset;
 
-        for (int visRow = s.Row; visRow <= e.Row; visRow++)
+        for (int virtualLine = s.Row; virtualLine <= e.Row; virtualLine++)
         {
-            int virtualLine = viewStartLine + visRow;
             bool isScrollback = virtualLine < scrollbackCount;
             int bufferRow = virtualLine - scrollbackCount;
 
-            int startCol = visRow == s.Row ? s.Col : 0;
-            int endCol = visRow == e.Row ? e.Col : buffer.Cols - 1;
+            int startCol = virtualLine == s.Row ? s.Col : 0;
+            int endCol = virtualLine == e.Row ? e.Col : buffer.Cols - 1;
 
             for (int col = startCol; col <= endCol && col < buffer.Cols; col++)
             {
@@ -127,7 +129,7 @@ public class TerminalSelection
             }
 
             // Trim trailing spaces on each line
-            if (visRow < e.Row)
+            if (virtualLine < e.Row)
             {
                 while (sb.Length > 0 && sb[^1] == ' ')
                     sb.Length--;
@@ -140,14 +142,14 @@ public class TerminalSelection
 
     /// <summary>
     /// Selects the word at the given position (double-click behavior).
-    /// row is a visual screen row; scrollOffset converts to buffer/scrollback coordinates.
+    /// Stores as virtual line coordinates.
     /// </summary>
-    public void SelectWord(TerminalBuffer buffer, int row, int col, int scrollOffset = 0)
+    public void SelectWord(TerminalBuffer buffer, int visRow, int col, int scrollOffset)
     {
         if (col < 0 || col >= buffer.Cols) return;
 
         int scrollbackCount = buffer.ScrollbackCount;
-        int virtualLine = scrollbackCount + scrollOffset + row;
+        int virtualLine = scrollbackCount + scrollOffset + visRow;
         bool isScrollback = virtualLine < scrollbackCount;
         int bufferRow = virtualLine - scrollbackCount;
 
@@ -167,8 +169,8 @@ public class TerminalSelection
 
         if (!IsWordChar(GetChar(col)))
         {
-            _start = new SelectionPoint(row, col);
-            _end = new SelectionPoint(row, col);
+            _start = new SelectionPoint(virtualLine, col);
+            _end = new SelectionPoint(virtualLine, col);
             SelectionChanged?.Invoke();
             return;
         }
@@ -182,28 +184,32 @@ public class TerminalSelection
         while (endCol < buffer.Cols - 1 && IsWordChar(GetChar(endCol + 1)))
             endCol++;
 
-        _start = new SelectionPoint(row, startCol);
-        _end = new SelectionPoint(row, endCol);
+        _start = new SelectionPoint(virtualLine, startCol);
+        _end = new SelectionPoint(virtualLine, endCol);
         SelectionChanged?.Invoke();
     }
 
     /// <summary>
     /// Selects the entire line (triple-click behavior).
+    /// Stores as virtual line coordinates.
     /// </summary>
-    public void SelectLine(int row, int cols)
+    public void SelectLine(int visRow, int cols, int scrollOffset, int scrollbackCount)
     {
-        _start = new SelectionPoint(row, 0);
-        _end = new SelectionPoint(row, cols - 1);
+        int virtualLine = scrollbackCount + scrollOffset + visRow;
+        _start = new SelectionPoint(virtualLine, 0);
+        _end = new SelectionPoint(virtualLine, cols - 1);
         SelectionChanged?.Invoke();
     }
 
     /// <summary>
-    /// Selects all content in the terminal buffer.
+    /// Selects all visible content in the terminal buffer.
     /// </summary>
-    public void SelectAll(int rows, int cols)
+    public void SelectAll(int rows, int cols, int scrollOffset, int scrollbackCount)
     {
-        _start = new SelectionPoint(0, 0);
-        _end = new SelectionPoint(rows - 1, cols - 1);
+        int firstVirtual = scrollbackCount + scrollOffset;
+        int lastVirtual = firstVirtual + rows - 1;
+        _start = new SelectionPoint(firstVirtual, 0);
+        _end = new SelectionPoint(lastVirtual, cols - 1);
         SelectionChanged?.Invoke();
     }
 }

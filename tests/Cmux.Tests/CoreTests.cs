@@ -438,20 +438,20 @@ public class TerminalSelectionTests
     public void StartAndExtend_CreatesSelection()
     {
         var selection = new TerminalSelection();
-        selection.StartSelection(0, 5);
-        selection.ExtendSelection(0, 10);
+        selection.StartSelection(0, 5, 0, 0);
+        selection.ExtendSelection(0, 10, 0, 0);
 
         selection.HasSelection.Should().BeTrue();
-        selection.IsSelected(0, 7).Should().BeTrue();
-        selection.IsSelected(0, 12).Should().BeFalse();
+        selection.IsSelected(0, 7, 0, 0).Should().BeTrue();
+        selection.IsSelected(0, 12, 0, 0).Should().BeFalse();
     }
 
     [Fact]
     public void Clear_RemovesSelection()
     {
         var selection = new TerminalSelection();
-        selection.StartSelection(0, 0);
-        selection.ExtendSelection(0, 10);
+        selection.StartSelection(0, 0, 0, 0);
+        selection.ExtendSelection(0, 10, 0, 0);
 
         selection.ClearSelection();
 
@@ -465,8 +465,8 @@ public class TerminalSelectionTests
         buffer.WriteString("Hello World");
 
         var selection = new TerminalSelection();
-        selection.StartSelection(0, 0);
-        selection.ExtendSelection(0, 4);
+        selection.StartSelection(0, 0, 0, 0);
+        selection.ExtendSelection(0, 4, 0, 0);
 
         var text = selection.GetSelectedText(buffer);
         text.Should().Be("Hello");
@@ -476,13 +476,13 @@ public class TerminalSelectionTests
     public void IsSelected_MultiLine_Works()
     {
         var selection = new TerminalSelection();
-        selection.StartSelection(0, 5);
-        selection.ExtendSelection(2, 10);
+        selection.StartSelection(0, 5, 0, 0);
+        selection.ExtendSelection(2, 10, 0, 0);
 
-        selection.IsSelected(0, 6).Should().BeTrue();
-        selection.IsSelected(1, 0).Should().BeTrue(); // Middle line, full
-        selection.IsSelected(2, 5).Should().BeTrue();
-        selection.IsSelected(2, 11).Should().BeFalse();
+        selection.IsSelected(0, 6, 0, 0).Should().BeTrue();
+        selection.IsSelected(1, 0, 0, 0).Should().BeTrue(); // Middle line, full
+        selection.IsSelected(2, 5, 0, 0).Should().BeTrue();
+        selection.IsSelected(2, 11, 0, 0).Should().BeFalse();
     }
 }
 

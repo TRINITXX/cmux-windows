@@ -130,7 +130,7 @@ public sealed class DaemonClient : IDisposable
         }
     }
 
-    private static string? FindDaemonExecutable()
+    public static string? FindDaemonExecutable()
     {
         var appDir = AppContext.BaseDirectory;
         LogDaemon($"[FindDaemon] AppContext.BaseDirectory: {appDir}");

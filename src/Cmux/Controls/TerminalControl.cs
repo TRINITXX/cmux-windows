@@ -41,12 +41,18 @@ public class TerminalControl : FrameworkElement
     private bool _followOutput = true;
     private int _lastScrollbackCount;
     private volatile bool _needsRender;
+    private bool _scrollbarDragging;
+    private bool _diagColorLogged; // DIAG: one-shot color debug
     private string _cursorStyle = "bar";
     private bool _cursorBlink = true;
 
     // Cursor blink timer
     private System.Windows.Threading.DispatcherTimer? _cursorTimer;
     private bool _cursorVisible = true;
+
+    // Auto-scroll during selection drag
+    private System.Windows.Threading.DispatcherTimer? _selectionAutoScrollTimer;
+    private int _selectionAutoScrollDirection; // -1 = up, 1 = down, 0 = none
 
     // Visual bell
     private DateTime _bellFlashUntil;
@@ -657,6 +663,7 @@ public class TerminalControl : FrameworkElement
     {
         bool isScrollback = virtualLine < scrollbackCount;
         int bufferRow = virtualLine - scrollbackCount;
+        int scrollOffset = virtualLine - scrollbackCount - visRow;
 
         TerminalCell[]? scrollbackLine = null;
         if (isScrollback)
@@ -666,67 +673,32 @@ public class TerminalControl : FrameworkElement
         double ceilW = Math.Ceiling(_cellWidth);
         double ceilH = Math.Ceiling(_cellHeight);
 
-        // Text run state for batching
-        int runStartCol = -1;
-        Color runFgColor = default;
-        bool runBold = false, runItalic = false, runDim = false;
-        bool runUnderline = false, runStrikethrough = false;
-        _textRunBuffer.Clear();
+        bool useGlyphRun = _glyphTypeface != null;
 
-        // Background run state for batching consecutive same-color cells
+        // ── PASS 1: Draw ALL backgrounds first ──────────────────────
         Color currentBgColor = default;
         double bgRunX = 0, bgRunWidth = 0;
         bool hasBgRun = false;
 
-        bool useGlyphRun = _glyphTypeface != null;
-
         for (int c = 0; c < _cols; c++)
         {
-            TerminalCell cell;
-            if (isScrollback)
-            {
-                cell = (scrollbackLine != null && c < scrollbackLine.Length)
-                    ? scrollbackLine[c]
-                    : TerminalCell.Empty;
-            }
-            else if (bufferRow >= 0 && bufferRow < buffer.Rows && c < buffer.Cols)
-            {
-                cell = buffer.CellAt(bufferRow, c);
-            }
-            else
-            {
-                cell = TerminalCell.Empty;
-            }
+            var cell = GetCell(c, isScrollback, scrollbackLine, bufferRow, buffer);
+            var attr = cell.Attribute;
+            bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse);
+
+            TerminalColor cellBg = isInverse
+                ? (attr.Foreground.IsDefault ? _theme.Foreground : attr.Foreground)
+                : attr.Background;
 
             double x = HorizontalPadding + c * _cellWidth;
-            var attr = cell.Attribute;
-            bool isSelected = _selection.IsSelected(visRow, c);
-            bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse) != isSelected;
-
-            // Cell colors
-            TerminalColor cellBg, cellFg;
-            if (isInverse)
-            {
-                cellBg = attr.Foreground.IsDefault ? _theme.Foreground : attr.Foreground;
-                cellFg = attr.Background.IsDefault ? _theme.Background : attr.Background;
-            }
-            else
-            {
-                cellBg = attr.Background;
-                cellFg = attr.Foreground;
-            }
-
-            if (isSelected && _theme.SelectionBackground.HasValue)
-                cellBg = _theme.SelectionBackground.Value;
-
-            // Background rectangle — batch consecutive cells of the same color
             var wpfBg = ToWpfColor(cellBg);
+            if (!cellBg.IsDefault)
+                wpfBg = Color.FromArgb(160, wpfBg.R, wpfBg.G, wpfBg.B); // ~63% opacity
+
             if (!cellBg.IsDefault)
             {
                 if (hasBgRun && wpfBg == currentBgColor)
-                {
                     bgRunWidth += ceilW;
-                }
                 else
                 {
                     if (hasBgRun)
@@ -743,32 +715,62 @@ public class TerminalControl : FrameworkElement
                 hasBgRun = false;
             }
 
-            // Search match highlight (behind text) — added as separate overlays
+            // Search match highlight
             bool isSearchMatch = searchMatchSet.Contains((visRow, c));
             bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
             if (isCurrentMatch)
                 dc.DrawRectangle(currentMatchBrush!, null, new Rect(x, y, ceilW, ceilH));
             else if (isSearchMatch)
                 dc.DrawRectangle(searchMatchBrush!, null, new Rect(x, y, ceilW, ceilH));
+        }
+        if (hasBgRun)
+            dc.DrawRectangle(GetCachedBrush(currentBgColor), null, new Rect(bgRunX, y, bgRunWidth, ceilH));
+
+        // ── PASS 2: Draw ALL text on top ────────────────────────────
+        int runStartCol = -1;
+        Color runFgColor = default;
+        bool runBold = false, runItalic = false, runDim = false;
+        bool runUnderline = false, runStrikethrough = false;
+        _textRunBuffer.Clear();
+
+        for (int c = 0; c < _cols; c++)
+        {
+            var cell = GetCell(c, isScrollback, scrollbackLine, bufferRow, buffer);
+            double x = HorizontalPadding + c * _cellWidth;
+            var attr = cell.Attribute;
+            bool isInverse = attr.Flags.HasFlag(CellFlags.Inverse);
+
+            TerminalColor cellBg = isInverse
+                ? (attr.Foreground.IsDefault ? _theme.Foreground : attr.Foreground)
+                : attr.Background;
+            TerminalColor cellFg = isInverse
+                ? (attr.Background.IsDefault ? _theme.Background : attr.Background)
+                : attr.Foreground;
 
             // URL hover highlight
             if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
-            {
                 dc.DrawLine(GetCachedPen(Color.FromRgb(0x81, 0x8C, 0xF8)), new Point(x, y + _cellHeight - 1), new Point(x + _cellWidth, y + _cellHeight - 1));
-            }
 
-            // Text batching: group consecutive characters with same visual style
+            // Cursor
+            bool isCursorCell = !isScrollback && bufferRow == buffer.CursorRow && c == buffer.CursorCol && buffer.CursorVisible;
+
             bool hasChar = cell.Character != '\0' && cell.Character != ' ';
             if (hasChar)
             {
                 var fgColor = cellFg.IsDefault ? ToWpfColor(_theme.Foreground) : ToWpfColor(cellFg);
+                // Minimum contrast enforcement (like WezTerm text_min_contrast_ratio)
+                if (!cellBg.IsDefault)
+                {
+                    var bgC = ToWpfColor(cellBg);
+                    if (WcagContrastRatio(fgColor, bgC) < 4.5)
+                        fgColor = ToWpfColor(_theme.Foreground);
+                }
                 bool bold = attr.Flags.HasFlag(CellFlags.Bold);
                 bool italic = attr.Flags.HasFlag(CellFlags.Italic);
                 bool dim = attr.Flags.HasFlag(CellFlags.Dim);
                 bool underline = attr.Flags.HasFlag(CellFlags.Underline);
                 bool strikethrough = attr.Flags.HasFlag(CellFlags.Strikethrough);
 
-                // Style changed? Flush the current run first
                 if (runStartCol >= 0 && (fgColor != runFgColor || bold != runBold ||
                     italic != runItalic || dim != runDim ||
                     underline != runUnderline || strikethrough != runStrikethrough))
@@ -780,7 +782,6 @@ public class TerminalControl : FrameworkElement
                     runStartCol = -1;
                 }
 
-                // Start new run or continue existing
                 if (runStartCol < 0)
                 {
                     runStartCol = c;
@@ -797,7 +798,6 @@ public class TerminalControl : FrameworkElement
             }
             else if (runStartCol >= 0)
             {
-                // Empty cell — flush the current run
                 if (useGlyphRun)
                     FlushGlyphRun(dc, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
                 else
@@ -806,10 +806,6 @@ public class TerminalControl : FrameworkElement
             }
         }
 
-        // Flush final background run
-        if (hasBgRun)
-            dc.DrawRectangle(GetCachedBrush(currentBgColor), null, new Rect(bgRunX, y, bgRunWidth, ceilH));
-
         // Flush final text run for this row
         if (runStartCol >= 0)
         {
@@ -817,6 +813,27 @@ public class TerminalControl : FrameworkElement
                 FlushGlyphRun(dc, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
             else
                 FlushTextRun(dc, dpi, y, runStartCol, runFgColor, runBold, runItalic, runDim, runUnderline, runStrikethrough);
+        }
+
+        // Selection overlay — drawn AFTER text so text remains visible under semi-transparent highlight
+        if (_selection.HasSelection && _theme.SelectionBackground.HasValue)
+        {
+            var selColor = _theme.SelectionBackground.Value;
+            var selBrush = GetCachedBrush(Color.FromArgb(100, selColor.R, selColor.G, selColor.B));
+            int selStart = -1;
+            for (int c = 0; c <= _cols; c++)
+            {
+                bool sel = c < _cols && _selection.IsSelected(visRow, c, scrollOffset, scrollbackCount);
+                if (sel && selStart < 0)
+                    selStart = c;
+                else if (!sel && selStart >= 0)
+                {
+                    double sx = HorizontalPadding + selStart * _cellWidth;
+                    double sw = (c - selStart) * _cellWidth;
+                    dc.DrawRectangle(selBrush, null, new Rect(sx, y, sw, ceilH));
+                    selStart = -1;
+                }
+            }
         }
     }
 
@@ -959,8 +976,36 @@ public class TerminalControl : FrameworkElement
         }
     }
 
+    private static TerminalCell GetCell(int col, bool isScrollback, TerminalCell[]? scrollbackLine, int bufferRow, TerminalBuffer buffer)
+    {
+        if (isScrollback)
+            return (scrollbackLine != null && col < scrollbackLine.Length) ? scrollbackLine[col] : TerminalCell.Empty;
+        if (bufferRow >= 0 && bufferRow < buffer.Rows && col < buffer.Cols)
+            return buffer.CellAt(bufferRow, col);
+        return TerminalCell.Empty;
+    }
+
     private static Color ToWpfColor(TerminalColor c) =>
         c.IsDefault ? Colors.Transparent : Color.FromRgb(c.R, c.G, c.B);
+
+    /// <summary>WCAG 2.0 contrast ratio between two colors (1:1 to 21:1).</summary>
+    private static double WcagContrastRatio(Color a, Color b)
+    {
+        double la = RelativeLuminance(a), lb = RelativeLuminance(b);
+        double lighter = Math.Max(la, lb), darker = Math.Min(la, lb);
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(Color c)
+    {
+        double r = SrgbToLinear(c.R / 255.0);
+        double g = SrgbToLinear(c.G / 255.0);
+        double b = SrgbToLinear(c.B / 255.0);
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    private static double SrgbToLinear(double v) =>
+        v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
 
     // --- Mouse reporting ---
 
@@ -1090,7 +1135,7 @@ public class TerminalControl : FrameworkElement
         if (_session == null || !_selection.HasSelection)
             return false;
 
-        var text = _selection.GetSelectedText(_session.Buffer, _scrollOffset);
+        var text = _selection.GetSelectedText(_session.Buffer);
         if (string.IsNullOrEmpty(text))
             return false;
 
@@ -1212,7 +1257,7 @@ public class TerminalControl : FrameworkElement
         {
             if (_selection.HasSelection)
             {
-                var text = _selection.GetSelectedText(_session.Buffer, _scrollOffset);
+                var text = _selection.GetSelectedText(_session.Buffer);
                 if (!string.IsNullOrEmpty(text))
                     Clipboard.SetText(text);
                 _selection.ClearSelection();
@@ -1502,6 +1547,35 @@ public class TerminalControl : FrameworkElement
         if (_cols <= 0 || _rows <= 0) return;
 
         var pos = e.GetPosition(this);
+
+        // Scrollbar click/drag — check before cell hit-testing
+        // Hit area is wider (20px) than the visual scrollbar (6px) for easier grabbing
+        if (_session != null && _session.Buffer.ScrollbackCount > 0)
+        {
+            const double scrollbarHitWidth = 20;
+            const double scrollbarMargin = 2;
+            double hitX = ActualWidth - scrollbarHitWidth - scrollbarMargin;
+            if (pos.X >= hitX)
+            {
+                int scrollbackCount = _session.Buffer.ScrollbackCount;
+                int totalLines = scrollbackCount + _rows;
+                double thumbRatio = (double)_rows / totalLines;
+                double thumbHeight = Math.Max(20, ActualHeight * thumbRatio);
+                double scrollFraction = Math.Clamp(pos.Y / Math.Max(1, ActualHeight - thumbHeight), 0, 1);
+                int viewStartLine = (int)(scrollFraction * (totalLines - _rows));
+                _scrollOffset = Math.Clamp(viewStartLine - scrollbackCount, -scrollbackCount, 0);
+                _followOutput = _scrollOffset == 0;
+                _lastScrollbackCount = scrollbackCount;
+
+                _scrollbarDragging = true;
+                CaptureMouse();
+                _forceFullRedraw = true;
+                RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+                e.Handled = true;
+                return;
+            }
+        }
+
         int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
         int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
 
@@ -1533,11 +1607,11 @@ public class TerminalControl : FrameworkElement
         }
         else if (e.ClickCount == 3 && _session != null)
         {
-            _selection.SelectLine(row, _session.Buffer.Cols);
+            _selection.SelectLine(row, _session.Buffer.Cols, _scrollOffset, _session.Buffer.ScrollbackCount);
         }
         else
         {
-            _selection.StartSelection(row, col);
+            _selection.StartSelection(row, col, _scrollOffset, _session?.Buffer.ScrollbackCount ?? 0);
             _mouseDown = true;
             CaptureMouse();
         }
@@ -1552,6 +1626,24 @@ public class TerminalControl : FrameworkElement
         if (_cols <= 0 || _rows <= 0) return;
 
         var pos = e.GetPosition(this);
+
+        // Scrollbar drag
+        if (_scrollbarDragging && _session != null)
+        {
+            int scrollbackCount = _session.Buffer.ScrollbackCount;
+            int totalLines = scrollbackCount + _rows;
+            double thumbRatio = (double)_rows / totalLines;
+            double thumbHeight = Math.Max(20, ActualHeight * thumbRatio);
+            double scrollFraction = Math.Clamp(pos.Y / Math.Max(1, ActualHeight - thumbHeight), 0, 1);
+            int viewStartLine = (int)(scrollFraction * (totalLines - _rows));
+            _scrollOffset = Math.Clamp(viewStartLine - scrollbackCount, -scrollbackCount, 0);
+            _followOutput = _scrollOffset == 0;
+            _lastScrollbackCount = scrollbackCount;
+            _forceFullRedraw = true;
+            RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+            return;
+        }
+
         int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
         int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
 
@@ -1614,16 +1706,67 @@ public class TerminalControl : FrameworkElement
             return;
         }
 
-        // Selection drag
+        // Selection drag with auto-scroll at edges
         if (_mouseDown && !IsMouseTrackingActive)
         {
-            _selection.ExtendSelection(row, col);
+            _selection.ExtendSelection(row, col, _scrollOffset, _session?.Buffer.ScrollbackCount ?? 0);
+
+            // Auto-scroll when mouse is near top/bottom edge
+            if (pos.Y < 0)
+                StartSelectionAutoScroll(-1);
+            else if (pos.Y > ActualHeight)
+                StartSelectionAutoScroll(1);
+            else
+                StopSelectionAutoScroll();
         }
+    }
+
+    private void StartSelectionAutoScroll(int direction)
+    {
+        _selectionAutoScrollDirection = direction;
+        if (_selectionAutoScrollTimer != null) return;
+        _selectionAutoScrollTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50),
+        };
+        _selectionAutoScrollTimer.Tick += (_, _) =>
+        {
+            if (_session == null || _selectionAutoScrollDirection == 0) return;
+            int scrollbackCount = _session.Buffer.ScrollbackCount;
+            _scrollOffset = Math.Clamp(_scrollOffset + _selectionAutoScrollDirection, -scrollbackCount, 0);
+            _followOutput = _scrollOffset == 0;
+            _lastScrollbackCount = scrollbackCount;
+
+            // Extend selection to edge row
+            int edgeRow = _selectionAutoScrollDirection < 0 ? 0 : _rows - 1;
+            int edgeCol = _selectionAutoScrollDirection < 0 ? 0 : _cols - 1;
+            _selection.ExtendSelection(edgeRow, edgeCol, _scrollOffset, scrollbackCount);
+
+            _forceFullRedraw = true;
+            RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+        };
+        _selectionAutoScrollTimer.Start();
+    }
+
+    private void StopSelectionAutoScroll()
+    {
+        _selectionAutoScrollDirection = 0;
+        _selectionAutoScrollTimer?.Stop();
+        _selectionAutoScrollTimer = null;
     }
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonUp(e);
+        StopSelectionAutoScroll();
+
+        if (_scrollbarDragging)
+        {
+            _scrollbarDragging = false;
+            ReleaseMouseCapture();
+            e.Handled = true;
+            return;
+        }
 
         if (IsMouseTrackingActive && _mouseDown && _cols > 0 && _rows > 0)
         {
@@ -1684,7 +1827,7 @@ public class TerminalControl : FrameworkElement
         {
             if (_session != null)
             {
-                var text = _selection.GetSelectedText(_session.Buffer, _scrollOffset);
+                var text = _selection.GetSelectedText(_session.Buffer);
                 if (!string.IsNullOrEmpty(text)) Clipboard.SetText(text);
                 _selection.ClearSelection();
             }
@@ -1704,7 +1847,7 @@ public class TerminalControl : FrameworkElement
         selectAllItem.Click += (_, _) =>
         {
             if (_session != null)
-                _selection.SelectAll(_session.Buffer.Rows, _session.Buffer.Cols);
+                _selection.SelectAll(_session.Buffer.Rows, _session.Buffer.Cols, _scrollOffset, _session.Buffer.ScrollbackCount);
         };
         menu.Items.Add(selectAllItem);
 

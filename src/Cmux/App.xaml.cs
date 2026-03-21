@@ -4,6 +4,7 @@ using Cmux.Core.Config;
 using Cmux.Core.IPC;
 using Cmux.Core.Services;
 using Cmux.Services;
+using Microsoft.Win32;
 
 namespace Cmux;
 
@@ -22,6 +23,7 @@ public partial class App : Application
     public static DaemonClient DaemonClient { get; } = new();
     public static Task<bool> DaemonConnectTask { get; private set; } = Task.FromResult(false);
     public static bool DaemonWasFreshStart { get; private set; }
+    public static bool NeedClaudeResume { get; private set; }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern bool SetConsoleOutputCP(uint wCodePageID);
@@ -31,6 +33,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Ensure ThreadPool has enough threads to avoid starvation during startup
+        System.Threading.ThreadPool.GetMinThreads(out var minWorker, out var minIO);
+        if (minWorker < 16) System.Threading.ThreadPool.SetMinThreads(16, minIO);
 
         // Force UTF-8 code page for ConPTY (fixes QR codes, Unicode block chars)
         SetConsoleOutputCP(65001);
@@ -58,24 +64,56 @@ public partial class App : Application
 
         // Daemon connect: try existing daemon first, then start one if needed.
         // Sessions wait for this task before deciding local vs daemon mode.
-        DaemonConnectTask = Task.Run(() =>
+        DaemonConnectTask = Task.Run(async () =>
         {
             DaemonLog("[App] Phase 1: Quick daemon check (300ms)...");
             if (DaemonClient.TryConnect(300))
             {
                 DaemonLog("[App] Phase 1: Daemon connected (existing)!");
                 DaemonWasFreshStart = false;
+
+                // Check if daemon has active sessions — if not, it was freshly
+                // started (e.g. at Windows boot) and we need to resume Claude Code.
+                try
+                {
+                    using var cts = new System.Threading.CancellationTokenSource(2000);
+                    var sessionsTask = DaemonClient.ListSessionsAsync();
+                    var completed = await Task.WhenAny(sessionsTask, Task.Delay(2000));
+                    if (completed == sessionsTask)
+                    {
+                        var sessions = await sessionsTask;
+                        NeedClaudeResume = sessions.Count == 0;
+                        DaemonLog($"[App] Phase 1: Daemon sessions={sessions.Count}, NeedClaudeResume={NeedClaudeResume}");
+                    }
+                    else
+                    {
+                        NeedClaudeResume = true;
+                        DaemonLog("[App] Phase 1: ListSessionsAsync timed out, assuming fresh start");
+                    }
+                }
+                catch
+                {
+                    NeedClaudeResume = true;
+                    DaemonLog("[App] Phase 1: ListSessionsAsync failed, assuming fresh start");
+                }
+
                 DaemonClient.RaiseConnected();
+                RegisterDaemonAutoStart();
                 return true;
             }
             DaemonLog("[App] Phase 1: Daemon not available, starting daemon...");
             DaemonWasFreshStart = true;
+            NeedClaudeResume = true;
 
             var connected = DaemonClient.StartDaemonAndConnect();
             DaemonLog(connected
                 ? "[App] Phase 2: Daemon started and connected"
                 : "[App] Phase 2: Daemon failed to start");
-            if (connected) DaemonClient.RaiseConnected();
+            if (connected)
+            {
+                DaemonClient.RaiseConnected();
+                RegisterDaemonAutoStart();
+            }
             return connected;
         });
 
@@ -104,4 +142,21 @@ public partial class App : Application
     }
 
     internal static void DaemonLog(string message) => DaemonClient.LogDaemon(message);
+
+    private static void RegisterDaemonAutoStart()
+    {
+        try
+        {
+            var exePath = DaemonClient.FindDaemonExecutable();
+            if (exePath == null) return;
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+            key?.SetValue("CmuxDaemon", $"\"{exePath}\"");
+            DaemonLog($"[App] Registered daemon autostart: {exePath}");
+        }
+        catch (Exception ex)
+        {
+            DaemonLog($"[App] Failed to register daemon autostart: {ex.Message}");
+        }
+    }
 }

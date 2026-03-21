@@ -96,6 +96,13 @@ public partial class WorkspaceSidebarItem : UserControl
         }
     }
 
+    private void OpenInExplorer_Click(object sender, RoutedEventArgs e)
+    {
+        var dir = Vm?.Workspace.WorkingDirectory;
+        if (!string.IsNullOrEmpty(dir) && System.IO.Directory.Exists(dir))
+            System.Diagnostics.Process.Start("explorer.exe", dir);
+    }
+
     private void NewSurface_Click(object sender, RoutedEventArgs e) => Vm?.CreateNewSurface();
 
     private void SetIcon_Click(object sender, RoutedEventArgs e)

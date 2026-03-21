@@ -62,10 +62,13 @@ public partial class MainViewModel : ObservableObject
         }
 
         // Restore session or create default workspace
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var session = SessionPersistenceService.Load();
+        App.DaemonLog($"[MainVM] SessionPersistenceService.Load: {sw.ElapsedMilliseconds}ms");
         if (session != null && session.Workspaces.Count > 0)
         {
             RestoreSession(session);
+            App.DaemonLog($"[MainVM] RestoreSession: {sw.ElapsedMilliseconds}ms total");
         }
         else
         {
@@ -411,6 +414,8 @@ public partial class MainViewModel : ObservableObject
                                     ScrollbackLines = kvp.Value.BufferSnapshot.ScrollbackLines.ToList(),
                                     ScreenLines = kvp.Value.BufferSnapshot.ScreenLines.ToList(),
                                 },
+                            ClaudeSessionId = kvp.Value.ClaudeSessionId,
+                            IsClaudeCode = kvp.Value.IsClaudeCode,
                         }),
                 };
 

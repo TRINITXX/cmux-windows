@@ -19,8 +19,6 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, List<string>> _paneCommandHistory = [];
     private readonly HashSet<string> _daemonPanes = [];
     private readonly HashSet<string> _daemonOutputLogged = [];
-    private static readonly object _daemonWaitLock = new();
-    private static bool _daemonWaitDone;
 
     [ObservableProperty]
     private string _name;
@@ -133,15 +131,15 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
 
         _ = Task.Run(async () =>
         {
-            // Wait for daemon connection
-            try { App.DaemonConnectTask.Wait(5000); } catch { }
+            // Wait for daemon connection — use await instead of .Wait() to avoid ThreadPool starvation
+            try { await App.DaemonConnectTask.WaitAsync(TimeSpan.FromSeconds(10)); } catch { }
 
-            // Only relaunch if daemon was freshly started (PC reboot / daemon was dead).
-            // If we reconnected to an existing daemon, sessions are still alive.
-            if (!App.DaemonWasFreshStart) return;
+            // Only relaunch if daemon has no existing sessions (fresh boot / daemon restart).
+            // If daemon had active sessions, they are still alive — no resume needed.
+            if (!App.NeedClaudeResume) return;
 
             // Wait for shell prompts to be ready
-            await Task.Delay(3000);
+            await Task.Delay(1500);
 
             // Relaunch Claude Code in each pane with --resume
             foreach (var (paneId, sessionId) in claudePanes)
@@ -149,13 +147,12 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
                     var cmd = "claude --dangerously-skip-permissions --effort max";
-                    if (!string.IsNullOrWhiteSpace(sessionId))
-                        cmd += $" --resume {sessionId}";
-                    else
-                        cmd += " --resume";
+                    cmd += string.IsNullOrWhiteSpace(sessionId)
+                        ? " --resume"
+                        : $" --resume {sessionId}";
                     SendCommandToPane(paneId, cmd);
                 });
-                await Task.Delay(500);
+                await Task.Delay(200);
             }
         });
     }
@@ -437,17 +434,8 @@ public partial class SurfaceViewModel : ObservableObject, IDisposable
     {
         // Wait for daemon connect task (includes starting daemon if needed).
         // First pane blocks up to 5s; subsequent panes get the cached result instantly.
-        lock (_daemonWaitLock)
-        {
-            if (!_daemonWaitDone)
-            {
-                DaemonLog($"[StartSession:{paneId}] Waiting for daemon connect task...");
-                try { App.DaemonConnectTask.Wait(5000); }
-                catch { /* timeout or connect failure — proceed with local */ }
-                _daemonWaitDone = true;
-            }
-        }
-
+        // Non-blocking check: if daemon task is already done, use it.
+        // Never call .Wait() — it causes ThreadPool starvation deadlock.
         var daemonReady = App.DaemonConnectTask.IsCompletedSuccessfully
                           && App.DaemonConnectTask.Result;
 

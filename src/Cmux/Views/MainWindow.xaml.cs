@@ -21,9 +21,13 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _autoSaveTimer;
     private ICollectionView? _workspaceView;
     private bool _zenMode;
+    private Cmux.Core.Models.Surface? _currentBrowserSurface;
+    private WorkspaceViewModel? _subscribedWorkspace;
     public MainWindow()
     {
+        App.DaemonLog($"[MainWindow] Constructor begin at {DateTime.Now:HH:mm:ss.fff}");
         InitializeComponent();
+        App.DaemonLog($"[MainWindow] InitializeComponent done at {DateTime.Now:HH:mm:ss.fff}");
         WindowAppearance.Apply(this);
         SetupWorkspaceFilter();
 
@@ -224,6 +228,7 @@ public partial class MainWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        App.DaemonLog($"[MainWindow] OnLoaded fired at {DateTime.Now:HH:mm:ss.fff}");
         // Restore window position from session state if available
         var session = Cmux.Core.Services.SessionPersistenceService.Load();
         if (session?.Window != null)
@@ -264,10 +269,9 @@ public partial class MainWindow : Window
         // Close integrated browser
         IntegratedBrowser.CloseRequested += () =>
         {
-            IntegratedBrowser.Visibility = Visibility.Collapsed;
-            BrowserSplitter.Visibility = Visibility.Collapsed;
-            BrowserSplitterColumn.Width = new GridLength(0);
-            BrowserColumn.Width = new GridLength(0);
+            SetBrowserVisible(false);
+            var surface = ViewModel.SelectedWorkspace?.SelectedSurface?.Surface;
+            if (surface != null) surface.BrowserVisible = false;
         };
     }
 
@@ -361,6 +365,15 @@ public partial class MainWindow : Window
 
         if (e.PropertyName == nameof(MainViewModel.SelectedWorkspace))
         {
+            // Re-subscribe to new workspace's PropertyChanged for surface switches
+            if (_subscribedWorkspace != null)
+                _subscribedWorkspace.PropertyChanged -= OnWorkspacePropertyChanged;
+            _subscribedWorkspace = ViewModel.SelectedWorkspace;
+            if (_subscribedWorkspace != null)
+                _subscribedWorkspace.PropertyChanged += OnWorkspacePropertyChanged;
+
+            OnActiveSurfaceChanged();
+
             // Focus the terminal when switching workspace via sidebar click
             Dispatcher.BeginInvoke(() => FocusTerminal(), System.Windows.Threading.DispatcherPriority.Input);
         }
@@ -536,24 +549,69 @@ public partial class MainWindow : Window
         }
     }
 
+    // ── Browser per-surface state ──────────────────────────────────────
+
+    private void SetBrowserVisible(bool visible, string? url = null)
+    {
+        if (visible)
+        {
+            IntegratedBrowser.Visibility = Visibility.Visible;
+            BrowserSplitterColumn.Width = new GridLength(10);
+            BrowserSplitter.Visibility = Visibility.Visible;
+            BrowserColumn.Width = new GridLength(1, GridUnitType.Star);
+            if (url != null) IntegratedBrowser.Navigate(url);
+        }
+        else
+        {
+            IntegratedBrowser.Visibility = Visibility.Collapsed;
+            BrowserSplitter.Visibility = Visibility.Collapsed;
+            BrowserSplitterColumn.Width = new GridLength(0);
+            BrowserColumn.Width = new GridLength(0);
+        }
+    }
+
+    private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(WorkspaceViewModel.SelectedSurface))
+            OnActiveSurfaceChanged();
+    }
+
+    private void OnActiveSurfaceChanged()
+    {
+        // Save state from the old surface
+        if (_currentBrowserSurface != null)
+        {
+            _currentBrowserSurface.BrowserVisible = IntegratedBrowser.Visibility == Visibility.Visible;
+            if (_currentBrowserSurface.BrowserVisible)
+                _currentBrowserSurface.BrowserUrl = IntegratedBrowser.GetCurrentUrl();
+        }
+
+        // Get the new surface
+        var newSurface = ViewModel.SelectedWorkspace?.SelectedSurface?.Surface;
+        _currentBrowserSurface = newSurface;
+
+        // Restore state from the new surface
+        if (newSurface?.BrowserVisible == true)
+            SetBrowserVisible(true, newSurface.BrowserUrl);
+        else
+            SetBrowserVisible(false);
+    }
+
     // Title bar handlers
     private void OpenIntegratedBrowser(string url)
     {
-        IntegratedBrowser.Visibility = Visibility.Visible;
-        BrowserSplitterColumn.Width = new GridLength(10);
-        BrowserSplitter.Visibility = Visibility.Visible;
-        BrowserColumn.Width = new GridLength(1, GridUnitType.Star);
-        IntegratedBrowser.Navigate(url);
+        SetBrowserVisible(true, url);
+        var surface = ViewModel.SelectedWorkspace?.SelectedSurface?.Surface;
+        if (surface != null) { surface.BrowserVisible = true; surface.BrowserUrl = url; }
     }
 
     private void ToolbarBrowser_Click(object sender, RoutedEventArgs e)
     {
         if (IntegratedBrowser.Visibility == Visibility.Visible)
         {
-            IntegratedBrowser.Visibility = Visibility.Collapsed;
-            BrowserSplitter.Visibility = Visibility.Collapsed;
-            BrowserSplitterColumn.Width = new GridLength(0);
-            BrowserColumn.Width = new GridLength(0);
+            SetBrowserVisible(false);
+            var surface = ViewModel.SelectedWorkspace?.SelectedSurface?.Surface;
+            if (surface != null) surface.BrowserVisible = false;
         }
         else
         {
