@@ -94,7 +94,7 @@ public static class TerminalThemes
         {
             Name = "Default Dark",
             Author = "cmux",
-            Background = new TerminalColor(0x0F, 0x0F, 0x0F),
+            Background = new TerminalColor(0x18, 0x1A, 0x1D),
             Foreground = new TerminalColor(0xE0, 0xE0, 0xE0),
             CursorColor = new TerminalColor(0x81, 0x8C, 0xF8),
             SelectionBg = new TerminalColor(0x33, 0x33, 0x55),
