@@ -8,7 +8,8 @@ namespace Cmux.Controls;
 /// <summary>
 /// WPF HwndHost that creates a child window for Direct3D 11 rendering.
 /// The HWND is used as the target for the DXGI swap chain.
-/// Mouse/keyboard input is forwarded to WPF via routed events.
+/// Mouse/keyboard Win32 messages are translated into WPF routed events
+/// so the parent TerminalControl receives them normally.
 /// </summary>
 internal sealed class D3DRenderHost : HwndHost
 {
@@ -23,7 +24,7 @@ internal sealed class D3DRenderHost : HwndHost
         EnsureWindowClassRegistered();
 
         _hwnd = CreateWindowEx(
-            WS_EX_TRANSPARENT, // Pass-through for mouse hit testing → events reach WPF
+            0,
             ClassName,
             "",
             WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
@@ -41,6 +42,77 @@ internal sealed class D3DRenderHost : HwndHost
     {
         DestroyWindow(hwnd.Handle);
         _hwnd = nint.Zero;
+    }
+
+    /// <summary>
+    /// Intercept Win32 messages on the child HWND and re-raise them as WPF
+    /// routed events so they bubble up to TerminalControl.
+    /// </summary>
+    protected override nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
+    {
+        switch (msg)
+        {
+            case WM_MOUSEWHEEL:
+            {
+                int delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
+                {
+                    RoutedEvent = UIElement.MouseWheelEvent,
+                };
+                RaiseEvent(args);
+                handled = true;
+                return nint.Zero;
+            }
+
+            case WM_LBUTTONDOWN:
+            {
+                // Capture mouse for drag selection
+                CaptureMouse();
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                {
+                    RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+                };
+                RaiseEvent(args);
+                handled = true;
+                return nint.Zero;
+            }
+
+            case WM_LBUTTONUP:
+            {
+                ReleaseMouseCapture();
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                {
+                    RoutedEvent = UIElement.MouseLeftButtonUpEvent,
+                };
+                RaiseEvent(args);
+                handled = true;
+                return nint.Zero;
+            }
+
+            case WM_RBUTTONDOWN:
+            {
+                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.MouseRightButtonDownEvent,
+                };
+                RaiseEvent(args);
+                handled = true;
+                return nint.Zero;
+            }
+
+            case WM_MOUSEMOVE:
+            {
+                var args = new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
+                {
+                    RoutedEvent = UIElement.MouseMoveEvent,
+                };
+                RaiseEvent(args);
+                handled = true;
+                return nint.Zero;
+            }
+        }
+
+        return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
     }
 
     private static void EnsureWindowClassRegistered()
@@ -64,7 +136,12 @@ internal sealed class D3DRenderHost : HwndHost
     private const int WS_CHILD = 0x40000000;
     private const int WS_VISIBLE = 0x10000000;
     private const int WS_CLIPSIBLINGS = 0x04000000;
-    private const int WS_EX_TRANSPARENT = 0x00000020;
+
+    private const int WM_MOUSEMOVE = 0x0200;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_LBUTTONUP = 0x0202;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MOUSEWHEEL = 0x020A;
 
     private static readonly nint DefWindowProcPtr =
         GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcW");
