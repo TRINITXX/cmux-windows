@@ -31,6 +31,7 @@ public class TerminalControl : FrameworkElement
     private D3DRenderHost? _renderHost;
     private D3DTerminalRenderer? _gpuRenderer;
     private bool _gpuInitialized;
+    private Point? _rawMousePosition; // Mouse position from Win32 lParam (WPF DIPs)
     private double _cellWidth;
     private double _cellHeight;
     private double _fontSize;
@@ -324,8 +325,10 @@ public class TerminalControl : FrameworkElement
         int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
         // Convert from device pixels to WPF DIPs
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        var pos = new Point(x / dpi, y / dpi);
+        _rawMousePosition = new Point(x / dpi, y / dpi);
 
+        try
+        {
         switch (msg)
         {
             case 0x0201: // WM_LBUTTONDOWN
@@ -378,6 +381,11 @@ public class TerminalControl : FrameworkElement
                 OnMouseWheel(args);
                 break;
             }
+        }
+        }
+        finally
+        {
+            _rawMousePosition = null;
         }
     }
 
@@ -1054,6 +1062,16 @@ public class TerminalControl : FrameworkElement
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Returns the mouse position in WPF DIPs relative to this control.
+    /// Uses the raw Win32 position when available (from HwndHost child HWND),
+    /// falls back to WPF's mouse tracking otherwise.
+    /// </summary>
+    private Point GetMousePos(MouseEventArgs e)
+    {
+        return _rawMousePosition ?? e.GetPosition(this);
+    }
+
     // --- Mouse input ---
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
@@ -1064,7 +1082,7 @@ public class TerminalControl : FrameworkElement
 
         if (_cols <= 0 || _rows <= 0) return;
 
-        var pos = e.GetPosition(this);
+        var pos = GetMousePos(e);
 
         // Scrollbar click/drag — check before cell hit-testing
         // Hit area is wider (20px) than the visual scrollbar (6px) for easier grabbing
@@ -1143,7 +1161,7 @@ public class TerminalControl : FrameworkElement
 
         if (_cols <= 0 || _rows <= 0) return;
 
-        var pos = e.GetPosition(this);
+        var pos = GetMousePos(e);
 
         // Scrollbar drag
         if (_scrollbarDragging && _session != null)
@@ -1288,7 +1306,7 @@ public class TerminalControl : FrameworkElement
 
         if (IsMouseTrackingActive && _mouseDown && _cols > 0 && _rows > 0)
         {
-            var pos = e.GetPosition(this);
+            var pos = GetMousePos(e);
             int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
             int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
             SendMouseReport(0, col, row, false);
@@ -1309,7 +1327,7 @@ public class TerminalControl : FrameworkElement
         {
             if (_cols <= 0 || _rows <= 0) return;
 
-            var pos = e.GetPosition(this);
+            var pos = GetMousePos(e);
             int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
             int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
             SendMouseReport(2, col, row, true);
@@ -1468,7 +1486,7 @@ public class TerminalControl : FrameworkElement
         {
             if (_cols <= 0 || _rows <= 0) return;
 
-            var pos = e.GetPosition(this);
+            var pos = GetMousePos(e);
             int col = Math.Clamp((int)((pos.X - HorizontalPadding) / _cellWidth), 0, _cols - 1);
             int row = Math.Clamp((int)(pos.Y / _cellHeight), 0, _rows - 1);
             int button = e.Delta > 0 ? 64 : 65; // 64 = scroll up, 65 = scroll down
