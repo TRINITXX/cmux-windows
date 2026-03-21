@@ -89,6 +89,7 @@ internal sealed class D3DRenderHost : HwndHost
             style = 0,
             lpfnWndProc = DefWindowProcPtr,
             hInstance = GetModuleHandle(null),
+            hCursor = LoadCursor(nint.Zero, 32512), // IDC_ARROW
             lpszClassName = ClassName,
         };
 
@@ -121,6 +122,9 @@ internal sealed class D3DRenderHost : HwndHost
 
     [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
     private static extern nint GetProcAddress(nint module, string procName);
+
+    [DllImport("user32.dll")]
+    private static extern nint LoadCursor(nint hInstance, int lpCursorName);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct WNDCLASSEX

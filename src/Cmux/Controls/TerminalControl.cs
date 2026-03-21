@@ -1340,6 +1340,10 @@ public class TerminalControl : FrameworkElement
             _forceFullRedraw = true;
             RequestRender(System.Windows.Threading.DispatcherPriority.Render);
         }
+        else if (Cursor != Cursors.Arrow)
+        {
+            Cursor = Cursors.Arrow;
+        }
 
         // Mouse reporting (motion events)
         if (IsMouseTrackingActive && _mouseDown)

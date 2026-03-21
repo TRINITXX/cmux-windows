@@ -269,6 +269,9 @@ public partial class MainWindow : Window
 
         PopulateTemplateMenu();
 
+        // Clear the Windows "app starting" cursor (spinning blue circle)
+        Dispatcher.BeginInvoke(() => { Mouse.OverrideCursor = null; }, DispatcherPriority.ApplicationIdle);
+
         // Sync sidebar width to ViewModel when user drags the splitter
         SidebarSplitter.DragCompleted += (_, _) =>
         {
