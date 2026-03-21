@@ -49,8 +49,10 @@ internal sealed class D3DTerminalRenderer : IDisposable
     private int _pixelHeight;
     private int _cols;
     private int _rows;
-    private float _cellWidth;
-    private float _cellHeight;
+    private float _cellWidth;   // WPF DIPs
+    private float _cellHeight;  // WPF DIPs
+    private int _cellWidthPx;   // device pixels (rounded, used for atlas + shader)
+    private int _cellHeightPx;  // device pixels (rounded, used for atlas + shader)
     private float _fontSize;
     private float _dpi;
     private GhosttyTheme _theme = new();
@@ -81,6 +83,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
         _rows = rows;
         _cellWidth = cellWidth;
         _cellHeight = cellHeight;
+        _cellWidthPx = (int)Math.Round(cellWidth * dpi);
+        _cellHeightPx = (int)Math.Round(cellHeight * dpi);
         _fontSize = fontSize;
         _dpi = dpi;
         _theme = theme;
@@ -138,7 +142,7 @@ internal sealed class D3DTerminalRenderer : IDisposable
 
         // 7. Create atlas and cell buffer
         _atlas = new GlyphAtlas(_device, _context, fontFamily, fontSize, dpi,
-            (int)Math.Ceiling(cellWidth * dpi), (int)Math.Ceiling(cellHeight * dpi));
+            _cellWidthPx, _cellHeightPx);
         _cellBuffer = new CellBuffer(_device, cols, rows);
     }
 
@@ -277,13 +281,12 @@ internal sealed class D3DTerminalRenderer : IDisposable
         // Update constant buffer
         // Cell dimensions and padding must be in device pixels (not WPF DIPs)
         // because the shader operates in pixel space matching the swap chain.
-        float cellWidthPx = _cellWidth * _dpi;
-        float cellHeightPx = _cellHeight * _dpi;
-        float paddingPx = HorizontalPadding * _dpi;
+        // Use the same integer pixel sizes as the atlas to prevent mismatches.
+        float paddingPx = MathF.Round(HorizontalPadding * _dpi);
 
         var constants = new ConstantBufferData
         {
-            CellSize = new Vector2(cellWidthPx, cellHeightPx),
+            CellSize = new Vector2(_cellWidthPx, _cellHeightPx),
             GridSize = new Vector2(_cols, _rows),
             AtlasSize = new Vector2(AtlasSize, AtlasSize),
             ViewportSize = new Vector2(_pixelWidth, _pixelHeight),
@@ -355,6 +358,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
         _rows = rows;
         _cellWidth = cellWidth;
         _cellHeight = cellHeight;
+        _cellWidthPx = (int)Math.Round(cellWidth * _dpi);
+        _cellHeightPx = (int)Math.Round(cellHeight * _dpi);
 
         _rtv?.Dispose();
         _rtv = null;
@@ -377,8 +382,9 @@ internal sealed class D3DTerminalRenderer : IDisposable
         _cellWidth = cellWidth;
         _cellHeight = cellHeight;
 
-        _atlas?.Invalidate(fontSize, dpi, fontFamily,
-            (int)Math.Ceiling(cellWidth * dpi), (int)Math.Ceiling(cellHeight * dpi));
+        _cellWidthPx = (int)Math.Round(cellWidth * dpi);
+        _cellHeightPx = (int)Math.Round(cellHeight * dpi);
+        _atlas?.Invalidate(fontSize, dpi, fontFamily, _cellWidthPx, _cellHeightPx);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

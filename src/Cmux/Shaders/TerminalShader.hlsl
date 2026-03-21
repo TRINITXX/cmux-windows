@@ -131,6 +131,9 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
                     + float2((float)col * cellSize.x, (float)row * cellSize.y)
                     + corner * float2(cellW, cellH);
 
+    // Snap to integer pixel boundaries to prevent sub-pixel gaps between cells
+    pixelPos = floor(pixelPos + 0.5);
+
     // Convert to NDC (clip space): x in [-1,1], y in [1,-1]
     float2 ndc;
     ndc.x =  (pixelPos.x / viewportSize.x) * 2.0 - 1.0;
