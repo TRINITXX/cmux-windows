@@ -3,7 +3,6 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Cmux.Core.Models;
 using Cmux.Core.Terminal;
-using SharpGen.Runtime;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
@@ -12,8 +11,9 @@ using Vortice.Mathematics;
 namespace Cmux.Rendering;
 
 /// <summary>
-/// Main D3D11 rendering orchestrator: initializes the device, swap chain, and shader
+/// Main D3D11 rendering orchestrator: initializes the device, offscreen render target, and shader
 /// pipeline, then drives per-frame cell population and instanced draw calls.
+/// The rendered frame is copied to a CPU-readable staging texture for WriteableBitmap presentation.
 /// </summary>
 internal sealed class D3DTerminalRenderer : IDisposable
 {
@@ -37,7 +37,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
     // ── D3D11 / DXGI objects ────────────────────────────────────────
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _context;
-    private IDXGISwapChain1? _swapChain;
+    private ID3D11Texture2D? _offscreenTarget;
+    private ID3D11Texture2D? _stagingTexture;
     private ID3D11RenderTargetView? _rtv;
     private ID3D11VertexShader? _vertexShader;
     private ID3D11PixelShader? _pixelShader;
@@ -61,7 +62,6 @@ internal sealed class D3DTerminalRenderer : IDisposable
     private float _dpi;
     private GhosttyTheme _theme = new();
     private bool _disposed;
-
     private const float HorizontalPadding = 20f;
 
     // Atlas texture is always 2048x2048 (matches GlyphAtlas internal constant).
@@ -70,17 +70,17 @@ internal sealed class D3DTerminalRenderer : IDisposable
     /// <summary>Whether the renderer has been successfully initialized and is not disposed.</summary>
     public bool IsInitialized => _device != null && !_disposed;
 
-    /// <summary>Current swap chain pixel dimensions (for mismatch detection).</summary>
+    /// <summary>Current render target pixel dimensions (for mismatch detection).</summary>
     public int PixelWidth => _pixelWidth;
     public int PixelHeight => _pixelHeight;
 
     // ── Initialization ──────────────────────────────────────────────
 
     /// <summary>
-    /// Creates the D3D11 device, swap chain, shaders, and GPU resources.
+    /// Creates the D3D11 device, offscreen render target, shaders, and GPU resources.
     /// </summary>
     public void Initialize(
-        nint hwnd, int pixelWidth, int pixelHeight,
+        int pixelWidth, int pixelHeight,
         string fontFamily, float fontSize, float dpi,
         int cols, int rows, float cellWidth, float cellHeight,
         GhosttyTheme theme)
@@ -106,31 +106,29 @@ internal sealed class D3DTerminalRenderer : IDisposable
             out _device,
             out _context).CheckError();
 
-        // 2. Query DXGI chain: Device -> Adapter -> Factory2
-        using var dxgiDevice = _device!.QueryInterface<IDXGIDevice>();
-        using var adapter = dxgiDevice.GetAdapter();
-        using var factory = adapter.GetParent<IDXGIFactory2>();
-
-        // 3. Create swap chain for the HWND
-        var scDesc = new SwapChainDescription1
+        // 2. Create offscreen render target (replaces swap chain back buffer)
+        var rtDesc = new Texture2DDescription
         {
             Width = (uint)pixelWidth,
             Height = (uint)pixelHeight,
+            MipLevels = 1,
+            ArraySize = 1,
             Format = Format.B8G8R8A8_UNorm,
-            Stereo = false,
             SampleDescription = new SampleDescription(1, 0),
-            BufferUsage = Usage.RenderTargetOutput,
-            BufferCount = 3, // Triple-buffer: avoids 30fps cliff when mouse input adds overhead
-            Scaling = Scaling.None,
-            SwapEffect = SwapEffect.FlipDiscard,
-            AlphaMode = AlphaMode.Ignore,
-            Flags = SwapChainFlags.None,
+            Usage = ResourceUsage.Default,
+            BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
         };
+        _offscreenTarget = _device!.CreateTexture2D(rtDesc);
+        _rtv = _device.CreateRenderTargetView(_offscreenTarget);
 
-        _swapChain = factory.CreateSwapChainForHwnd(_device, hwnd, scDesc);
-        CreateRenderTarget();
+        // 3. Create staging texture for CPU readback
+        var stagingDesc = rtDesc;
+        stagingDesc.Usage = ResourceUsage.Staging;
+        stagingDesc.BindFlags = BindFlags.None;
+        stagingDesc.CPUAccessFlags = CpuAccessFlags.Read;
+        _stagingTexture = _device.CreateTexture2D(stagingDesc);
 
-        // 4. Compile shaders
+        // 4. Compile shaders (numbering continues from texture creation above)
         _vertexShader = ShaderLoader.CreateVertexShader(_device, out var vsBytecode);
         vsBytecode.Dispose();
         _pixelShader = ShaderLoader.CreatePixelShader(_device);
@@ -170,7 +168,7 @@ internal sealed class D3DTerminalRenderer : IDisposable
         string cursorStyle, bool cursorVisible)
     {
         if (_disposed || _device == null || _context == null ||
-            _swapChain == null || _atlas == null || _cellBuffer == null)
+            _offscreenTarget == null || _rtv == null || _atlas == null || _cellBuffer == null)
             return;
 
         // Recover from null RTV (CreateRenderTarget failed previously)
@@ -186,6 +184,13 @@ internal sealed class D3DTerminalRenderer : IDisposable
         }
 
         var buffer = session.Buffer;
+
+        // ── Unbind atlas SRV before cell population ─────────────────
+        // GetOrRasterize() may call UpdateSubresource on the atlas texture.
+        // If the atlas SRV is still bound from the previous frame's draw call,
+        // this creates a D3D11 hazard (write to resource bound for reading)
+        // that can trigger GPU driver bugs causing full-screen brightness flicker.
+        _context.PSSetShaderResources(1, Array.Empty<ID3D11ShaderResourceView>());
 
         // ── Populate CellBuffer under render lock ───────────────────
         // scrollbackCount MUST be captured inside the lock to match the buffer state
@@ -359,37 +364,54 @@ internal sealed class D3DTerminalRenderer : IDisposable
         // Single instanced draw call for the entire grid
         _context.DrawInstanced(6, (uint)_cellBuffer.CellCount, 0, 0);
 
-        // Present immediately (DWM handles VSync for FlipDiscard)
+        // Frame is ready in _offscreenTarget — caller will call CopyFrameToBuffer()
+    }
+
+    // ── Frame readback ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Copies the last rendered frame into the provided pixel buffer (BGRA, row-major).
+    /// Returns true if the copy succeeded.
+    /// </summary>
+    public bool CopyFrameToBuffer(Span<byte> destination)
+    {
+        if (_disposed || _context == null || _offscreenTarget == null || _stagingTexture == null)
+            return false;
+
+        _context.CopyResource(_stagingTexture, _offscreenTarget);
+        var mapped = _context.Map(_stagingTexture, 0, MapMode.Read);
         try
         {
-            var hr = _swapChain.Present(0, PresentFlags.None);
-
-            // Any DXGI failure (not just DeviceRemoved/Reset) means the swap
-            // chain or device is in a bad state — force full recreation.
-            if (hr.Failure)
+            unsafe
             {
-                Debug.WriteLine($"[D3DTerminalRenderer] Present failed (hr=0x{hr.Code:X8}) — requesting full recreation");
-                _disposed = true;
+                // Copy row-by-row (mapped pitch may differ from texture width)
+                int rowBytes = _pixelWidth * 4;
+                for (int y = 0; y < _pixelHeight; y++)
+                {
+                    var src = new ReadOnlySpan<byte>(
+                        (byte*)mapped.DataPointer + y * mapped.RowPitch, rowBytes);
+                    src.CopyTo(destination.Slice(y * rowBytes, rowBytes));
+                }
             }
+            return true;
         }
-        catch (SharpGenException ex)
+        finally
         {
-            Debug.WriteLine($"[D3DTerminalRenderer] Present threw (hr=0x{ex.HResult:X8}) — requesting full recreation");
-            _disposed = true;
+            _context.Unmap(_stagingTexture, 0);
         }
     }
 
     // ── Resize / reconfigure ────────────────────────────────────────
 
     /// <summary>
-    /// Resizes the swap chain and cell buffer after the host window changes size.
+    /// Resizes the offscreen render target and cell buffer after the control changes size.
     /// </summary>
-    public void ResizeSwapChain(
+    public void ResizeRenderTarget(
         int pixelWidth, int pixelHeight,
         int cols, int rows,
         float cellWidth, float cellHeight)
     {
-        if (_disposed || _swapChain == null) return;
+        if (_disposed || _device == null) return;
 
         _pixelWidth = pixelWidth;
         _pixelHeight = pixelHeight;
@@ -402,10 +424,27 @@ internal sealed class D3DTerminalRenderer : IDisposable
 
         _rtv?.Dispose();
         _rtv = null;
+        _offscreenTarget?.Dispose();
+        _stagingTexture?.Dispose();
 
-        _swapChain.ResizeBuffers(0, (uint)pixelWidth, (uint)pixelHeight, Format.Unknown, SwapChainFlags.None);
+        var rtDesc = new Texture2DDescription
+        {
+            Width = (uint)pixelWidth, Height = (uint)pixelHeight,
+            MipLevels = 1, ArraySize = 1,
+            Format = Format.B8G8R8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Default,
+            BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
+        };
+        _offscreenTarget = _device.CreateTexture2D(rtDesc);
+
+        var stagingDesc = rtDesc;
+        stagingDesc.Usage = ResourceUsage.Staging;
+        stagingDesc.BindFlags = BindFlags.None;
+        stagingDesc.CPUAccessFlags = CpuAccessFlags.Read;
+        _stagingTexture = _device.CreateTexture2D(stagingDesc);
+
         CreateRenderTarget();
-
         _cellBuffer?.Resize(cols, rows);
     }
 
@@ -432,8 +471,7 @@ internal sealed class D3DTerminalRenderer : IDisposable
     {
         _rtv?.Dispose();
         _rtv = null; // Prevent use of disposed RTV if recreation fails
-        using var backBuffer = _swapChain!.GetBuffer<ID3D11Texture2D>(0);
-        _rtv = _device!.CreateRenderTargetView(backBuffer);
+        _rtv = _device!.CreateRenderTargetView(_offscreenTarget!);
     }
 
     private void HandleDeviceLost()
@@ -481,7 +519,8 @@ internal sealed class D3DTerminalRenderer : IDisposable
         _pixelShader?.Dispose();
         _vertexShader?.Dispose();
         _rtv?.Dispose();
-        _swapChain?.Dispose();
+        _stagingTexture?.Dispose();
+        _offscreenTarget?.Dispose();
         _context?.Dispose();
         _device?.Dispose();
     }

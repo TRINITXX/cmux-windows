@@ -80,16 +80,25 @@ public partial class MainWindow : Window
         const int WM_QUERYENDSESSION = 0x0011;
         const int WM_ENDSESSION = 0x0016;
         const int WM_GETMINMAXINFO = 0x0024;
+        const int WM_NCHITTEST = 0x0084;
         const int WM_NCCALCSIZE = 0x0083;
 
         if (msg == WM_NCCALCSIZE && wParam != IntPtr.Zero && IsZoomed(hwnd))
         {
-            // Force the entire window rect as client area when maximized,
-            // preventing any non-client border gap at screen edges.
-            // Uses native IsZoomed() instead of WPF WindowState because
-            // WM_NCCALCSIZE fires before WPF updates its WindowState property.
             handled = true;
             return IntPtr.Zero;
+        }
+
+        // Custom hit-testing for resize borders and title bar drag
+        // (replaces WindowChrome which caused DWM brightness flickering)
+        if (msg == WM_NCHITTEST)
+        {
+            var result = HandleNcHitTest(hwnd, lParam);
+            if (result != IntPtr.Zero)
+            {
+                handled = true;
+                return result;
+            }
         }
 
         if (msg == WM_GETMINMAXINFO)
@@ -147,6 +156,63 @@ public partial class MainWindow : Window
 
         System.Runtime.InteropServices.Marshal.StructureToPtr(mmi, lParam, true);
     }
+
+    private IntPtr HandleNcHitTest(IntPtr hwnd, IntPtr lParam)
+    {
+        const int HTCAPTION = 2;
+        const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13;
+        const int HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+        const int BORDER = 6;
+
+        int x = (short)(lParam.ToInt64() & 0xFFFF);
+        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+
+        GetWindowRect(hwnd, out var rc);
+        int relX = x - rc.Left;
+        int relY = y - rc.Top;
+        int w = rc.Right - rc.Left;
+        int h = rc.Bottom - rc.Top;
+
+        // Don't resize when maximized
+        if (WindowState != WindowState.Maximized)
+        {
+            if (relY < BORDER && relX < BORDER) return new IntPtr(HTTOPLEFT);
+            if (relY < BORDER && relX >= w - BORDER) return new IntPtr(HTTOPRIGHT);
+            if (relY >= h - BORDER && relX < BORDER) return new IntPtr(HTBOTTOMLEFT);
+            if (relY >= h - BORDER && relX >= w - BORDER) return new IntPtr(HTBOTTOMRIGHT);
+            if (relX < BORDER) return new IntPtr(HTLEFT);
+            if (relX >= w - BORDER) return new IntPtr(HTRIGHT);
+            if (relY < BORDER) return new IntPtr(HTTOP);
+            if (relY >= h - BORDER) return new IntPtr(HTBOTTOM);
+        }
+
+        // Title bar drag area (top 38px, but not over interactive controls)
+        if (relY < 38)
+        {
+            // Check if mouse is over an interactive element
+            var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            var pt = new Point(relX / dpi, relY / dpi);
+            var hit = InputHitTest(pt) as DependencyObject;
+
+            // Walk up to find if we hit a Button, TextBox, or other interactive control
+            while (hit != null && hit != this)
+            {
+                if (hit is System.Windows.Controls.Primitives.ButtonBase
+                    || hit is System.Windows.Controls.TextBox
+                    || hit is System.Windows.Controls.ComboBox
+                    || hit is Controls.SurfaceTabBar)
+                    return IntPtr.Zero; // Let WPF handle — it's an interactive element
+                hit = System.Windows.Media.VisualTreeHelper.GetParent(hit);
+            }
+
+            return new IntPtr(HTCAPTION);
+        }
+
+        return IntPtr.Zero; // HTCLIENT — default WPF handling
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RECT lpRect);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);

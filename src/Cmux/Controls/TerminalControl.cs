@@ -28,11 +28,10 @@ public class TerminalControl : FrameworkElement
     private Typeface _typeface;
 
     // GPU renderer
-    private D3DRenderHost? _renderHost;
+    private System.Windows.Controls.Image? _renderImage;
+    private System.Windows.Media.Imaging.WriteableBitmap? _bitmap;
     private D3DTerminalRenderer? _gpuRenderer;
     private bool _gpuInitialized;
-
-    private Point? _rawMousePosition; // Mouse position from Win32 lParam (WPF DIPs)
     private double _cellWidth;
     private double _cellHeight;
     private double _fontSize;
@@ -51,8 +50,7 @@ public class TerminalControl : FrameworkElement
     private string _cursorStyle = "bar";
     private bool _cursorBlink = true;
 
-    // Render timer — fires at ~60fps independently of WPF's render schedule
-    // to prevent the D3D11 swap chain from going stale (black screen).
+    // Render timer — fires at ~60fps independently of WPF's render schedule.
     private System.Windows.Threading.DispatcherTimer? _renderTimer;
 
     // Cursor blink timer
@@ -167,7 +165,12 @@ public class TerminalControl : FrameworkElement
             FontFamily = settings.FontFamily,
             FontSize = settings.FontSize
         };
-        _renderHost = new D3DRenderHost();
+        _renderImage = new System.Windows.Controls.Image
+        {
+            Stretch = System.Windows.Media.Stretch.None,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
 
         _fontSize = _theme.FontSize;
         // Font family with fallbacks for Unicode block/braille characters (QR codes, box drawing)
@@ -319,16 +322,15 @@ public class TerminalControl : FrameworkElement
 
     private void OnControlLoaded(object sender, RoutedEventArgs e)
     {
-        if (_renderHost != null && !IsAncestorOf(_renderHost))
+        if (_renderImage != null && !IsAncestorOf(_renderImage))
         {
-            AddVisualChild(_renderHost);
-            AddLogicalChild(_renderHost);
-            _renderHost.RawInput += OnRenderHostRawInput;
+            AddVisualChild(_renderImage);
+            AddLogicalChild(_renderImage);
         }
 
         // Use a DispatcherTimer instead of CompositionTarget.Rendering.
         // CompositionTarget.Rendering stops firing when WPF has no visual
-        // changes, causing the D3D11 swap chain to go stale (black screen).
+        // changes, causing stale frames.
         if (_renderTimer == null)
         {
             _renderTimer = new System.Windows.Threading.DispatcherTimer
@@ -345,103 +347,18 @@ public class TerminalControl : FrameworkElement
         OnCompositionTargetRendering(sender, e);
     }
 
-    /// <summary>
-    /// Translates raw Win32 mouse messages from the D3D11 child HWND into
-    /// WPF mouse coordinates and calls the appropriate handler directly.
-    /// </summary>
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool ScreenToClient(nint hWnd, ref POINT lpPoint);
-
-    private void OnRenderHostRawInput(int msg, nint wParam, nint lParam)
-    {
-        // Convert screen position to child HWND client coords, then to WPF DIPs.
-        // This avoids DPI double-conversion issues with PointFromScreen.
-        {
-            GetCursorPos(out var cursor);
-            var origin = PointToScreen(new Point(0, 0));
-            double localPxX = cursor.X - origin.X;
-            double localPxY = cursor.Y - origin.Y;
-            var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-            var localDip = new Point(localPxX / dpi, localPxY / dpi);
-            _rawMousePosition = localDip;
-        }
-
-        try
-        {
-        switch (msg)
-        {
-            case 0x0201: // WM_LBUTTONDOWN
-            {
-                Focus();
-                FocusRequested?.Invoke();
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                {
-                    RoutedEvent = UIElement.MouseLeftButtonDownEvent,
-                };
-                OnMouseLeftButtonDown(args);
-                break;
-            }
-            case 0x0202: // WM_LBUTTONUP
-            {
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                {
-                    RoutedEvent = UIElement.MouseLeftButtonUpEvent,
-                };
-                OnMouseLeftButtonUp(args);
-                break;
-            }
-            case 0x0204: // WM_RBUTTONDOWN
-            {
-                Focus();
-                FocusRequested?.Invoke();
-                var args = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Right)
-                {
-                    RoutedEvent = UIElement.MouseRightButtonDownEvent,
-                };
-                OnMouseRightButtonDown(args);
-                break;
-            }
-            case 0x0200: // WM_MOUSEMOVE
-            {
-                var args = new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
-                {
-                    RoutedEvent = UIElement.MouseMoveEvent,
-                };
-                OnMouseMove(args);
-                break;
-            }
-            case 0x020A: // WM_MOUSEWHEEL
-            {
-                int delta = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
-                var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, delta)
-                {
-                    RoutedEvent = UIElement.MouseWheelEvent,
-                };
-                OnMouseWheel(args);
-                break;
-            }
-        }
-        }
-        finally
-        {
-            _rawMousePosition = null;
-        }
-    }
-
     private void OnControlUnloaded(object sender, RoutedEventArgs e)
     {
         _renderTimer?.Stop();
         _gpuRenderer?.Dispose();
         _gpuRenderer = null;
-        // Do NOT dispose _renderHost here — its HWND must survive Loaded/Unloaded
-        // cycles. Disposing it destroys the HWND, and a disposed HwndHost won't
-        // recreate it when re-added to the visual tree (causing permanent black screen).
+        _bitmap = null;
         _gpuInitialized = false;
     }
 
@@ -458,7 +375,7 @@ public class TerminalControl : FrameworkElement
         }
 
         // Lazy GPU init
-        if (!_gpuInitialized && _renderHost?.Hwnd != nint.Zero)
+        if (!_gpuInitialized && _renderImage != null)
         {
             try
             {
@@ -485,9 +402,9 @@ public class TerminalControl : FrameworkElement
         }
         _needsRender = false;
 
-        // Ensure swap chain dimensions match current control size.
+        // Ensure render target dimensions match current control size.
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         {
-            var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
             int expectedW = (int)(ActualWidth * dpi);
             int expectedH = (int)(ActualHeight * dpi);
             if (expectedW > 0 && expectedH > 0 &&
@@ -495,7 +412,7 @@ public class TerminalControl : FrameworkElement
             {
                 try
                 {
-                    _gpuRenderer.ResizeSwapChain(expectedW, expectedH, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
+                    _gpuRenderer.ResizeRenderTarget(expectedW, expectedH, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
                 }
                 catch (Exception ex)
                 {
@@ -558,6 +475,32 @@ public class TerminalControl : FrameworkElement
             return;
         }
 
+        // Copy rendered frame to WriteableBitmap
+        int pw = _gpuRenderer.PixelWidth;
+        int ph = _gpuRenderer.PixelHeight;
+        if (_bitmap == null || _bitmap.PixelWidth != pw || _bitmap.PixelHeight != ph)
+        {
+            _bitmap = new System.Windows.Media.Imaging.WriteableBitmap(
+                pw, ph, 96 * dpi, 96 * dpi,
+                System.Windows.Media.PixelFormats.Bgra32, null);
+            _renderImage!.Source = _bitmap;
+        }
+
+        _bitmap.Lock();
+        try
+        {
+            unsafe
+            {
+                var buffer = new Span<byte>((void*)_bitmap.BackBuffer, pw * ph * 4);
+                if (_gpuRenderer.CopyFrameToBuffer(buffer))
+                    _bitmap.AddDirtyRect(new System.Windows.Int32Rect(0, 0, pw, ph));
+            }
+        }
+        finally
+        {
+            _bitmap.Unlock();
+        }
+
         _forceFullRedraw = false;
     }
 
@@ -570,7 +513,7 @@ public class TerminalControl : FrameworkElement
 
         _gpuRenderer = new D3DTerminalRenderer();
         _gpuRenderer.Initialize(
-            _renderHost!.Hwnd, pw, ph,
+            pw, ph,
             _theme.FontFamily, (float)_fontSize, (float)dpi,
             _cols, _rows, (float)_cellWidth, (float)_cellHeight,
             _theme);
@@ -611,13 +554,13 @@ public class TerminalControl : FrameworkElement
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        _renderHost?.Measure(availableSize);
+        _renderImage?.Measure(availableSize);
         return availableSize;
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        _renderHost?.Arrange(new Rect(finalSize));
+        _renderImage?.Arrange(new Rect(finalSize));
         return finalSize;
     }
 
@@ -640,7 +583,7 @@ public class TerminalControl : FrameworkElement
             int pw = (int)(ActualWidth * newDpi.PixelsPerDip);
             int ph = (int)(ActualHeight * newDpi.PixelsPerDip);
             if (pw > 0 && ph > 0)
-                _gpuRenderer.ResizeSwapChain(pw, ph, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
+                _gpuRenderer.ResizeRenderTarget(pw, ph, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
         }
 
         _forceFullRedraw = true;
@@ -659,7 +602,7 @@ public class TerminalControl : FrameworkElement
             int pw = (int)(ActualWidth * dpi);
             int ph = (int)(ActualHeight * dpi);
             if (pw > 0 && ph > 0)
-                _gpuRenderer.ResizeSwapChain(pw, ph, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
+                _gpuRenderer.ResizeRenderTarget(pw, ph, _cols, _rows, (float)_cellWidth, (float)_cellHeight);
         }
 
         RequestRender(System.Windows.Threading.DispatcherPriority.Render);
@@ -1210,15 +1153,10 @@ public class TerminalControl : FrameworkElement
 
     /// <summary>
     /// Returns the mouse position in WPF DIPs relative to this control.
-    /// Always computes from Win32 GetCursorPos because WPF's mouse tracking
-    /// is stale (the HwndHost child HWND captures WM_MOUSEMOVE).
+    /// Uses Win32 GetCursorPos for pixel-accurate coordinates.
     /// </summary>
     private Point GetMousePos(MouseEventArgs e)
     {
-        if (_rawMousePosition.HasValue)
-            return _rawMousePosition.Value;
-
-        // Fallback: always use GetCursorPos (never WPF's stale e.GetPosition)
         GetCursorPos(out var pt);
         var origin = PointToScreen(new Point(0, 0));
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
@@ -1673,11 +1611,11 @@ public class TerminalControl : FrameworkElement
 
     // --- Visual tree ---
 
-    protected override int VisualChildrenCount => _renderHost != null ? 1 : 0;
+    protected override int VisualChildrenCount => _renderImage != null ? 1 : 0;
 
     protected override Visual GetVisualChild(int index)
     {
-        if (index == 0 && _renderHost != null) return _renderHost;
+        if (index == 0 && _renderImage != null) return _renderImage;
         throw new ArgumentOutOfRangeException(nameof(index));
     }
 

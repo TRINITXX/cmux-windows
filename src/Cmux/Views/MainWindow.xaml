@@ -13,10 +13,8 @@
         KeyDown="OnKeyDown"
         PreviewKeyDown="OnPreviewKeyDown">
 
-    <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="38" CornerRadius="0" GlassFrameThickness="0"
-                      ResizeBorderThickness="6" />
-    </WindowChrome.WindowChrome>
+    <!-- WindowChrome removed: it causes DWM brightness flickering with HwndHost D3D11.
+         Resize/drag handled via WM_NCHITTEST in code-behind. -->
 
     <Window.Resources>
         <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#FF141420" />
@@ -152,7 +150,7 @@
                     <!-- Hamburger menu button -->
                     <Button Grid.Column="0" Style="{StaticResource IconButton}"
                             Click="ToggleMenuBar_Click"
-                            WindowChrome.IsHitTestVisibleInChrome="True"
+
                             Width="38" Height="38" ToolTip="Toggle Menu (Alt)">
                         <TextBlock Text="&#xE700;" FontFamily="Segoe MDL2 Assets" FontSize="14" />
                     </Button>
