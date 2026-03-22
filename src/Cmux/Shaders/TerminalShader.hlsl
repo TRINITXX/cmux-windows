@@ -318,5 +318,6 @@ float4 PSMain(VSOutput i) : SV_Target
     // ------------------------------------------------------------------
     color.rgb = lerp(color.rgb, float3(1.0, 1.0, 1.0), bellAlpha * 0.3);
 
+    color.a = 1.0; // Force opaque output — prevent DWM glass bleed-through
     return color;
 }

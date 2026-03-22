@@ -224,32 +224,22 @@ public class TerminalControl : FrameworkElement
         _needsRender = true;
     }
 
+    private volatile bool _redrawPending;
+
     private void OnRedraw()
     {
-        if (_session == null)
-            return;
-
-        var currentScrollback = _session.Buffer.ScrollbackCount;
-        var scrollbackDelta = currentScrollback - _lastScrollbackCount;
-
-        if (_followOutput || _scrollOffset == 0)
+        // Signal that a render is needed. Viewport stabilization (_scrollOffset
+        // adjustment) is done in OnCompositionTargetRendering under RenderLock
+        // so that the scroll state and buffer snapshot are always consistent.
+        _needsRender = true;
+        if (_redrawPending) return;
+        _redrawPending = true;
+        Dispatcher.BeginInvoke(() =>
         {
-            // Live mode: always stick to bottom.
-            _scrollOffset = 0;
-            _followOutput = true;
-        }
-        else if (_scrollOffset < 0 && scrollbackDelta > 0)
-        {
-            // Freeze viewport while output is streaming.
-            _scrollOffset -= scrollbackDelta;
-        }
-
-        _scrollOffset = Math.Clamp(_scrollOffset, -currentScrollback, 0);
-        if (_scrollOffset == 0)
-            _followOutput = true;
-
-        _lastScrollbackCount = currentScrollback;
-        RequestRender();
+            _redrawPending = false;
+            if (_renderTimer != null && !_renderTimer.IsEnabled)
+                _renderTimer.Start();
+        });
     }
 
     private void OnBell()
@@ -322,6 +312,9 @@ public class TerminalControl : FrameworkElement
     private void RequestRender(System.Windows.Threading.DispatcherPriority priority = System.Windows.Threading.DispatcherPriority.Background)
     {
         _needsRender = true;
+        // All callers run on the UI thread, so restart the timer directly.
+        if (_renderTimer != null && !_renderTimer.IsEnabled)
+            _renderTimer.Start();
     }
 
     private void OnControlLoaded(object sender, RoutedEventArgs e)
@@ -486,7 +479,10 @@ public class TerminalControl : FrameworkElement
         // which causes visible brightness flickering on the entire screen.
         bool bellActive = DateTime.UtcNow < _bellFlashUntil;
         if (!_needsRender && !bellActive)
+        {
+            _renderTimer?.Stop();
             return;
+        }
         _needsRender = false;
 
         // Ensure swap chain dimensions match current control size.
@@ -517,16 +513,40 @@ public class TerminalControl : FrameworkElement
             ? (float)(_bellFlashUntil - DateTime.UtcNow).TotalMilliseconds / 150f
             : 0f;
 
-        int scrollbackOffset = _scrollOffset;
-
         try
         {
-            _gpuRenderer.Render(
-                _session, _scrollOffset, _rows,
-                cursorAlpha, bellAlpha,
-                _selection, scrollbackOffset,
-                _searchMatchSetCache, _currentMatchSetCache,
-                _hoveredUrl, _cursorStyle, _cursorVisible);
+            // Viewport stabilization + cell population must use the SAME buffer
+            // snapshot. We take RenderLock here; Render() re-takes it internally
+            // (reentrant in .NET) so the lock stays held for the entire operation.
+            lock (_session.RenderLock)
+            {
+                var currentScrollback = _session.Buffer.ScrollbackCount;
+                var scrollbackDelta = currentScrollback - _lastScrollbackCount;
+
+                if (_followOutput || _scrollOffset == 0)
+                {
+                    _scrollOffset = 0;
+                    _followOutput = true;
+                }
+                else if (_scrollOffset < 0 && scrollbackDelta > 0)
+                {
+                    _scrollOffset -= scrollbackDelta;
+                }
+
+                _scrollOffset = Math.Clamp(_scrollOffset, -currentScrollback, 0);
+                if (_scrollOffset == 0)
+                    _followOutput = true;
+
+                _lastScrollbackCount = currentScrollback;
+
+                int scrollbackOffset = _scrollOffset;
+                _gpuRenderer.Render(
+                    _session, _scrollOffset, _rows,
+                    cursorAlpha, bellAlpha,
+                    _selection, scrollbackOffset,
+                    _searchMatchSetCache, _currentMatchSetCache,
+                    _hoveredUrl, _cursorStyle, _cursorVisible);
+            }
         }
         catch (Exception ex)
         {

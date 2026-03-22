@@ -33,7 +33,7 @@ public partial class SurfaceTabBar : UserControl
 
     private void OnClaudeStatusChanged(string paneId, ClaudeStatus oldStatus, ClaudeStatus newStatus)
     {
-        Dispatcher.Invoke(() =>
+        Dispatcher.BeginInvoke(() =>
         {
             // Find all tab items and update dots for surfaces containing this pane
             var itemsControl = FindVisualChild<ItemsControl>(this);
