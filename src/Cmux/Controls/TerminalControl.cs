@@ -806,6 +806,9 @@ public class TerminalControl : FrameworkElement
     {
         if (_session == null) return;
 
+        // WPF sets e.Key to Key.System when Alt is held; the actual key is in e.SystemKey.
+        var key = (e.Key == Key.System) ? e.SystemKey : e.Key;
+
         var modifiers = Keyboard.Modifiers;
         bool ctrl = modifiers.HasFlag(ModifierKeys.Control);
         bool shift = modifiers.HasFlag(ModifierKeys.Shift);
@@ -816,10 +819,10 @@ public class TerminalControl : FrameworkElement
         // and Ctrl+Shift combos (split, zoom, search, etc.) are app-level.
         if (ctrl && alt) return;
         if (ctrl && shift) return;
-        if (ctrl && e.Key == Key.Tab) return;
+        if (ctrl && key == Key.Tab) return;
 
         // Ctrl+Backspace: delete previous word (send Ctrl+W / unix-word-rubout)
-        if (ctrl && e.Key == Key.Back)
+        if (ctrl && key == Key.Back)
         {
             _inputLineBuffer.Clear();
             EnsureLiveView();
@@ -829,7 +832,7 @@ public class TerminalControl : FrameworkElement
         }
 
         // Terminal shortcuts
-        if (ctrl && e.Key == Key.C)
+        if (ctrl && key == Key.C)
         {
             if (!CopySelectionToClipboard())
             {
@@ -843,14 +846,14 @@ public class TerminalControl : FrameworkElement
             return;
         }
 
-        if ((ctrl && e.Key == Key.V) || (shift && e.Key == Key.Insert))
+        if ((ctrl && key == Key.V) || (shift && key == Key.Insert))
         {
             PasteFromClipboard();
             e.Handled = true;
             return;
         }
 
-        if (ctrl && e.Key == Key.Insert)
+        if (ctrl && key == Key.Insert)
         {
             _ = CopySelectionToClipboard();
             e.Handled = true;
@@ -858,7 +861,7 @@ public class TerminalControl : FrameworkElement
         }
 
         // Forward Ctrl+letter as control bytes (e.g. Ctrl+X => 0x18) for TUI apps like nano.
-        if (ctrl && !modifiers.HasFlag(ModifierKeys.Alt) && TryGetCtrlLetterSequence(e.Key, out var ctrlSequence))
+        if (ctrl && !modifiers.HasFlag(ModifierKeys.Alt) && TryGetCtrlLetterSequence(key, out var ctrlSequence))
         {
             _inputLineBuffer.Clear();
             EnsureLiveView();
@@ -867,13 +870,24 @@ public class TerminalControl : FrameworkElement
             return;
         }
 
+        // Alt+letter: send ESC followed by the character (standard xterm behavior).
+        // Alt-only (no Ctrl) — Ctrl+Alt is blocked above for app shortcuts.
+        if (alt && !ctrl && key >= Key.A && key <= Key.Z)
+        {
+            char ch = shift ? (char)('A' + (key - Key.A)) : (char)('a' + (key - Key.A));
+            EnsureLiveView();
+            _session.Write("\x1b" + ch);
+            e.Handled = true;
+            return;
+        }
+
         bool appCursor = _session.Buffer.ApplicationCursorKeys;
-        string? sequence = KeyToVtSequence(e.Key, modifiers, appCursor);
+        string? sequence = KeyToVtSequence(key, modifiers, appCursor);
         if (sequence != null)
         {
-            if (e.Key == Key.Back)
+            if (key == Key.Back)
                 TrackInputText("\b");
-            else if (e.Key == Key.Enter)
+            else if (key == Key.Enter && modifiers == ModifierKeys.None)
             {
                 SubmitBufferedCommand(allowInterception: true);
                 if (_suppressNextEnterToShell)
@@ -1678,51 +1692,93 @@ public class TerminalControl : FrameworkElement
         return true;
     }
 
+    /// <summary>
+    /// Computes the xterm modifier parameter: 1 + (shift?1) + (alt?2) + (ctrl?4).
+    /// Returns 0 when no modifiers are active.
+    /// </summary>
+    private static int GetXtermModifierParam(ModifierKeys modifiers)
+    {
+        int mod = 0;
+        if (modifiers.HasFlag(ModifierKeys.Shift))   mod += 1;
+        if (modifiers.HasFlag(ModifierKeys.Alt))     mod += 2;
+        if (modifiers.HasFlag(ModifierKeys.Control)) mod += 4;
+        return mod == 0 ? 0 : mod + 1;
+    }
+
     private static string? KeyToVtSequence(Key key, ModifierKeys modifiers, bool appCursor)
     {
-        if (appCursor)
+        int mod = GetXtermModifierParam(modifiers);
+
+        // Modified Enter: CSI u (fixterms) encoding — e.g. Shift+Enter → \x1b[13;2u
+        if (key == Key.Enter && mod > 0)
+            return $"\x1b[13;{mod}u";
+
+        // Arrow keys, Home, End: \x1b[1;{mod}{letter} when modified,
+        // SS3 in app cursor mode when unmodified, CSI otherwise.
+        char? arrowLetter = key switch
         {
-            var appSeq = key switch
-            {
-                Key.Up => "\x1bOA",
-                Key.Down => "\x1bOB",
-                Key.Right => "\x1bOC",
-                Key.Left => "\x1bOD",
-                Key.Home => "\x1bOH",
-                Key.End => "\x1bOF",
-                _ => (string?)null,
-            };
-            if (appSeq != null) return appSeq;
+            Key.Up    => 'A',
+            Key.Down  => 'B',
+            Key.Right => 'C',
+            Key.Left  => 'D',
+            Key.Home  => 'H',
+            Key.End   => 'F',
+            _ => null,
+        };
+        if (arrowLetter is char al)
+        {
+            if (mod > 0) return $"\x1b[1;{mod}{al}";
+            if (appCursor) return $"\x1bO{al}";
+            return $"\x1b[{al}";
         }
 
+        // Tilde-encoded keys: \x1b[{n};{mod}~ when modified.
+        int? tildeCode = key switch
+        {
+            Key.Insert   => 2,
+            Key.Delete   => 3,
+            Key.PageUp   => 5,
+            Key.PageDown => 6,
+            _ => null,
+        };
+        if (tildeCode is int tc)
+            return mod > 0 ? $"\x1b[{tc};{mod}~" : $"\x1b[{tc}~";
+
+        // F1-F4: SS3 unmodified, CSI with modifier param when modified.
+        char? f14Letter = key switch
+        {
+            Key.F1 => 'P',
+            Key.F2 => 'Q',
+            Key.F3 => 'R',
+            Key.F4 => 'S',
+            _ => null,
+        };
+        if (f14Letter is char fl)
+            return mod > 0 ? $"\x1b[1;{mod}{fl}" : $"\x1bO{fl}";
+
+        // F5-F12: tilde format with optional modifier param.
+        int? fnCode = key switch
+        {
+            Key.F5  => 15,
+            Key.F6  => 17,
+            Key.F7  => 18,
+            Key.F8  => 19,
+            Key.F9  => 20,
+            Key.F10 => 21,
+            Key.F11 => 23,
+            Key.F12 => 24,
+            _ => null,
+        };
+        if (fnCode is int fn)
+            return mod > 0 ? $"\x1b[{fn};{mod}~" : $"\x1b[{fn}~";
+
+        // Simple keys (no modifier encoding).
         return key switch
         {
-            Key.Enter => "\r",
+            Key.Enter  => "\r",
             Key.Escape => "\x1b",
-            Key.Back => "\x7f",
-            Key.Tab => modifiers.HasFlag(ModifierKeys.Shift) ? "\x1b[Z" : "\t",
-            Key.Up => "\x1b[A",
-            Key.Down => "\x1b[B",
-            Key.Right => "\x1b[C",
-            Key.Left => "\x1b[D",
-            Key.Home => "\x1b[H",
-            Key.End => "\x1b[F",
-            Key.Insert => "\x1b[2~",
-            Key.Delete => "\x1b[3~",
-            Key.PageUp => "\x1b[5~",
-            Key.PageDown => "\x1b[6~",
-            Key.F1 => "\x1bOP",
-            Key.F2 => "\x1bOQ",
-            Key.F3 => "\x1bOR",
-            Key.F4 => "\x1bOS",
-            Key.F5 => "\x1b[15~",
-            Key.F6 => "\x1b[17~",
-            Key.F7 => "\x1b[18~",
-            Key.F8 => "\x1b[19~",
-            Key.F9 => "\x1b[20~",
-            Key.F10 => "\x1b[21~",
-            Key.F11 => "\x1b[23~",
-            Key.F12 => "\x1b[24~",
+            Key.Back   => "\x7f",
+            Key.Tab    => modifiers.HasFlag(ModifierKeys.Shift) ? "\x1b[Z" : "\t",
             _ => null,
         };
     }
