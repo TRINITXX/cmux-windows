@@ -80,6 +80,17 @@ public partial class MainWindow : Window
         const int WM_QUERYENDSESSION = 0x0011;
         const int WM_ENDSESSION = 0x0016;
         const int WM_GETMINMAXINFO = 0x0024;
+        const int WM_NCCALCSIZE = 0x0083;
+
+        if (msg == WM_NCCALCSIZE && wParam != IntPtr.Zero && IsZoomed(hwnd))
+        {
+            // Force the entire window rect as client area when maximized,
+            // preventing any non-client border gap at screen edges.
+            // Uses native IsZoomed() instead of WPF WindowState because
+            // WM_NCCALCSIZE fires before WPF updates its WindowState property.
+            handled = true;
+            return IntPtr.Zero;
+        }
 
         if (msg == WM_GETMINMAXINFO)
         {
@@ -119,8 +130,8 @@ public partial class MainWindow : Window
                 mmi.ptMaxSize.X = work.Right - work.Left;
                 mmi.ptMaxSize.Y = work.Bottom - work.Top;
 
-                // If taskbar is auto-hide (work area == monitor area), leave 2px
-                // at each edge so the mouse can trigger the taskbar to appear
+                // If taskbar is auto-hide (work area == monitor area), leave 1px
+                // at the bottom edge so the mouse can trigger the taskbar.
                 if (work.Left == full.Left && work.Top == full.Top &&
                     work.Right == full.Right && work.Bottom == full.Bottom)
                 {
@@ -129,13 +140,7 @@ public partial class MainWindow : Window
                     bool autoHide = (state & 0x01) != 0; // ABS_AUTOHIDE
 
                     if (autoHide)
-                    {
-                        // Shrink by 2px on all edges to allow auto-hide taskbar trigger
-                        mmi.ptMaxPosition.X += 2;
-                        mmi.ptMaxPosition.Y += 2;
-                        mmi.ptMaxSize.X -= 4;
-                        mmi.ptMaxSize.Y -= 4;
-                    }
+                        mmi.ptMaxSize.Y -= 1;
                 }
             }
         }
@@ -148,6 +153,9 @@ public partial class MainWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsZoomed(IntPtr hwnd);
 
     [System.Runtime.InteropServices.DllImport("shell32.dll")]
     private static extern uint SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
@@ -354,15 +362,28 @@ public partial class MainWindow : Window
         // Update maximize/restore icon
         MaxRestoreIcon.Text = maximized ? "\uE923" : "\uE922";
         MaxRestoreButton.ToolTip = maximized ? "Restore" : "Maximize";
+        // When maximized, eliminate resize border (not needed).
+        var chrome = System.Windows.Shell.WindowChrome.GetWindowChrome(this);
+        if (chrome != null)
+            chrome.ResizeBorderThickness = maximized ? new Thickness(0) : new Thickness(6);
         UpdateWindowClip();
     }
 
     private void UpdateWindowClip()
     {
-        double radius = WindowState == WindowState.Maximized ? 0 : 10;
-        WindowClipGeometry.RadiusX = radius;
-        WindowClipGeometry.RadiusY = radius;
+        if (WindowState == WindowState.Maximized)
+        {
+            // No clip needed when maximized (no rounded corners).
+            // Removing the clip prevents any DPI rounding mismatch between
+            // the clip geometry and the actual window area from creating
+            // a 1px non-interactive gap at screen edges.
+            WindowBorder.Clip = null;
+            return;
+        }
+        WindowClipGeometry.RadiusX = 10;
+        WindowClipGeometry.RadiusY = 10;
         WindowClipGeometry.Rect = new System.Windows.Rect(0, 0, WindowBorder.ActualWidth, WindowBorder.ActualHeight);
+        WindowBorder.Clip = WindowClipGeometry;
     }
 
     private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)

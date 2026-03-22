@@ -289,7 +289,7 @@ float4 PSMain(VSOutput i) : SV_Target
     // ------------------------------------------------------------------
     if (scrollbarAlpha > 0.0)
     {
-        float sbWidth  = 30.0;
+        float sbWidth  = 50.0;
         float sbLeft   = viewportSize.x - sbWidth - 1.0;
         float px = i.pos.x;
         float py = i.pos.y;

@@ -1207,7 +1207,7 @@ public class TerminalControl : FrameworkElement
         // Hit area is wider than the visual scrollbar (10px) for easier grabbing
         if (_session != null && _session.Buffer.ScrollbackCount > 0)
         {
-            double hitX = ActualWidth - 30;
+            double hitX = ActualWidth - 20;
             if (pos.X >= hitX)
             {
                 int scrollbackCount = _session.Buffer.ScrollbackCount;
