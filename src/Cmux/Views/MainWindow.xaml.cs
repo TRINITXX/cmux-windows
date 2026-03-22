@@ -371,19 +371,7 @@ public partial class MainWindow : Window
 
     private void UpdateWindowClip()
     {
-        if (WindowState == WindowState.Maximized)
-        {
-            // No clip needed when maximized (no rounded corners).
-            // Removing the clip prevents any DPI rounding mismatch between
-            // the clip geometry and the actual window area from creating
-            // a 1px non-interactive gap at screen edges.
-            WindowBorder.Clip = null;
-            return;
-        }
-        WindowClipGeometry.RadiusX = 10;
-        WindowClipGeometry.RadiusY = 10;
-        WindowClipGeometry.Rect = new System.Windows.Rect(0, 0, WindowBorder.ActualWidth, WindowBorder.ActualHeight);
-        WindowBorder.Clip = WindowClipGeometry;
+        WindowBorder.Clip = null;
     }
 
     private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)

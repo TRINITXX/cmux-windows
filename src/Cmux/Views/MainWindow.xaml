@@ -14,7 +14,7 @@
         PreviewKeyDown="OnPreviewKeyDown">
 
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="38" CornerRadius="0" GlassFrameThickness="-1"
+        <WindowChrome CaptionHeight="38" CornerRadius="0" GlassFrameThickness="0"
                       ResizeBorderThickness="6" />
     </WindowChrome.WindowChrome>
 
@@ -129,11 +129,8 @@
     </Window.DataContext>
 
     <Border x:Name="WindowBorder" Background="{StaticResource BackgroundBrush}"
-            CornerRadius="{StaticResource WindowCornerRadius}"
+            CornerRadius="0"
             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
-        <Border.Clip>
-            <RectangleGeometry x:Name="WindowClipGeometry" RadiusX="10" RadiusY="10" />
-        </Border.Clip>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" /> <!-- Title bar -->
